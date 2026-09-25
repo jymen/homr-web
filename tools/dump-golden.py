@@ -113,8 +113,16 @@ def symbols_json(symbols: list[EncodedSymbol]):
     ]
 
 
+def golden_dir_for(image_path: Path) -> Path:
+    """Private pages live in test/fixtures/local/ and their golden data in
+    test/golden/local/; both are git-ignored. Everything else is public."""
+    if image_path.parent.name == "local":
+        return GOLDEN / "local" / image_path.stem
+    return GOLDEN / image_path.stem
+
+
 def dump(image_path: Path, config: Config) -> None:
-    out = GOLDEN / image_path.stem
+    out = golden_dir_for(image_path)
     out.mkdir(parents=True, exist_ok=True)
     print(f"== {image_path.name} -> {out.relative_to(ROOT)}")
 
@@ -234,7 +242,9 @@ def main() -> None:
     config = Config()
     config.use_gpu_inference = False
     config.use_coreml_encoder = False
-    pages = [Path(p) for p in sys.argv[1:]] or sorted(FIXTURES.glob("*.png"))
+    pages = [Path(p).resolve() for p in sys.argv[1:]] or sorted(FIXTURES.glob("*.png")) + sorted(
+        (FIXTURES / "local").glob("*.png")
+    )
     for page in pages:
         dump(page, config)
 

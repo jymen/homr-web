@@ -24,6 +24,15 @@ SHA-256 of every model file is recorded per fixture in
 `test/golden/<fixture>/meta.json` by the golden dumper. The models are
 homr's, downloaded unchanged; this repository never contains them.
 
+## Fixtures: public pages only
+
+Only pages the AbcMusicStudio app typeset itself are committed; they carry
+no third-party rights. Every other page (scans, published collections,
+photographs) stays private in `test/fixtures/local/`, which git ignores,
+with its golden data in `test/golden/local/`. The dumper and the tests
+handle both directories the same way, so CI runs on the public pages and a
+developer's machine on all of them. Details in `test/fixtures/SOURCE.md`.
+
 ## How the port is tested
 
 Every stage of homr's pipeline is a function from arrays to arrays.
