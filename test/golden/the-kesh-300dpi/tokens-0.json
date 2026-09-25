@@ -1,0 +1,350 @@
+[
+ {
+  "rhythm": "clef_G2",
+  "pitch": "_",
+  "lift": "_",
+  "articulation": "_",
+  "slur": "_",
+  "position": "upper",
+  "coordinates": [
+   65.59716796875,
+   164.85525512695312
+  ]
+ },
+ {
+  "rhythm": "keySignature_1",
+  "pitch": ".",
+  "lift": ".",
+  "articulation": ".",
+  "slur": ".",
+  "position": ".",
+  "coordinates": [
+   104.08786010742188,
+   104.9449462890625
+  ]
+ },
+ {
+  "rhythm": "timeSignature/8",
+  "pitch": ".",
+  "lift": ".",
+  "articulation": ".",
+  "slur": ".",
+  "position": ".",
+  "coordinates": [
+   136.04103088378906,
+   149.98580932617188
+  ]
+ },
+ {
+  "rhythm": "note_8",
+  "pitch": "D5",
+  "lift": "_",
+  "articulation": "_",
+  "slur": "_",
+  "position": "upper",
+  "coordinates": [
+   181.36544799804688,
+   122.54606628417969
+  ]
+ },
+ {
+  "rhythm": "repeatStart",
+  "pitch": ".",
+  "lift": ".",
+  "articulation": ".",
+  "slur": ".",
+  "position": ".",
+  "coordinates": [
+   216.03323364257812,
+   121.75345611572266
+  ]
+ },
+ {
+  "rhythm": "note_4.",
+  "pitch": "G4",
+  "lift": "_",
+  "articulation": "_",
+  "slur": "_",
+  "position": "upper",
+  "coordinates": [
+   258.0772399902344,
+   142.34274291992188
+  ]
+ },
+ {
+  "rhythm": "note_8",
+  "pitch": "G4",
+  "lift": "_",
+  "articulation": "_",
+  "slur": "_",
+  "position": "upper",
+  "coordinates": [
+   330.59466552734375,
+   130.42613220214844
+  ]
+ },
+ {
+  "rhythm": "note_8",
+  "pitch": "A4",
+  "lift": "_",
+  "articulation": "_",
+  "slur": "_",
+  "position": "upper",
+  "coordinates": [
+   372.8408203125,
+   123.1066665649414
+  ]
+ },
+ {
+  "rhythm": "note_8",
+  "pitch": "B4",
+  "lift": "_",
+  "articulation": "_",
+  "slur": "_",
+  "position": "upper",
+  "coordinates": [
+   412.2276611328125,
+   111.51319122314453
+  ]
+ },
+ {
+  "rhythm": "barline",
+  "pitch": ".",
+  "lift": ".",
+  "articulation": ".",
+  "slur": ".",
+  "position": ".",
+  "coordinates": [
+   449.5683898925781,
+   123.15873718261719
+  ]
+ },
+ {
+  "rhythm": "note_4.",
+  "pitch": "A4",
+  "lift": "_",
+  "articulation": "_",
+  "slur": "_",
+  "position": "upper",
+  "coordinates": [
+   470.23046875,
+   130.3539276123047
+  ]
+ },
+ {
+  "rhythm": "note_8",
+  "pitch": "A4",
+  "lift": "_",
+  "articulation": "_",
+  "slur": "_",
+  "position": "upper",
+  "coordinates": [
+   537.9983520507812,
+   137.31861877441406
+  ]
+ },
+ {
+  "rhythm": "note_8",
+  "pitch": "B4",
+  "lift": "_",
+  "articulation": "_",
+  "slur": "_",
+  "position": "upper",
+  "coordinates": [
+   535.3626098632812,
+   136.1410675048828
+  ]
+ },
+ {
+  "rhythm": "note_8",
+  "pitch": "D5",
+  "lift": "_",
+  "articulation": "_",
+  "slur": "_",
+  "position": "upper",
+  "coordinates": [
+   631.847900390625,
+   113.95491790771484
+  ]
+ },
+ {
+  "rhythm": "barline",
+  "pitch": ".",
+  "lift": ".",
+  "articulation": ".",
+  "slur": ".",
+  "position": ".",
+  "coordinates": [
+   677.25244140625,
+   132.1483917236328
+  ]
+ },
+ {
+  "rhythm": "note_8",
+  "pitch": "E5",
+  "lift": "_",
+  "articulation": "_",
+  "slur": "_",
+  "position": "upper",
+  "coordinates": [
+   703.7310791015625,
+   109.60599517822266
+  ]
+ },
+ {
+  "rhythm": "note_8",
+  "pitch": "D5",
+  "lift": "_",
+  "articulation": "_",
+  "slur": "_",
+  "position": "upper",
+  "coordinates": [
+   716.4961547851562,
+   117.58201599121094
+  ]
+ },
+ {
+  "rhythm": "note_8",
+  "pitch": "D5",
+  "lift": "_",
+  "articulation": "_",
+  "slur": "_",
+  "position": "upper",
+  "coordinates": [
+   790.4266967773438,
+   114.54866027832031
+  ]
+ },
+ {
+  "rhythm": "note_8",
+  "pitch": "G5",
+  "lift": "_",
+  "articulation": "_",
+  "slur": "_",
+  "position": "upper",
+  "coordinates": [
+   824.3421630859375,
+   96.63981628417969
+  ]
+ },
+ {
+  "rhythm": "note_8",
+  "pitch": "D5",
+  "lift": "_",
+  "articulation": "_",
+  "slur": "_",
+  "position": "upper",
+  "coordinates": [
+   846.2633056640625,
+   120.82317352294922
+  ]
+ },
+ {
+  "rhythm": "note_8",
+  "pitch": "D5",
+  "lift": "_",
+  "articulation": "_",
+  "slur": "_",
+  "position": "upper",
+  "coordinates": [
+   899.0537719726562,
+   137.76844787597656
+  ]
+ },
+ {
+  "rhythm": "barline",
+  "pitch": ".",
+  "lift": ".",
+  "articulation": ".",
+  "slur": ".",
+  "position": ".",
+  "coordinates": [
+   952.6805419921875,
+   136.70880126953125
+  ]
+ },
+ {
+  "rhythm": "note_8",
+  "pitch": "E5",
+  "lift": "_",
+  "articulation": "_",
+  "slur": "_",
+  "position": "upper",
+  "coordinates": [
+   979.2714233398438,
+   98.63086700439453
+  ]
+ },
+ {
+  "rhythm": "note_8",
+  "pitch": "D5",
+  "lift": "_",
+  "articulation": "_",
+  "slur": "_",
+  "position": "upper",
+  "coordinates": [
+   1003.2152099609375,
+   112.85552978515625
+  ]
+ },
+ {
+  "rhythm": "note_8",
+  "pitch": "B4",
+  "lift": "_",
+  "articulation": "_",
+  "slur": "_",
+  "position": "upper",
+  "coordinates": [
+   1059.8333740234375,
+   131.83692932128906
+  ]
+ },
+ {
+  "rhythm": "note_8",
+  "pitch": "D5",
+  "lift": "_",
+  "articulation": "_",
+  "slur": "_",
+  "position": "upper",
+  "coordinates": [
+   1100.3052978515625,
+   100.40452575683594
+  ]
+ },
+ {
+  "rhythm": "note_8",
+  "pitch": "B4",
+  "lift": "_",
+  "articulation": "_",
+  "slur": "_",
+  "position": "upper",
+  "coordinates": [
+   1136.3148193359375,
+   134.53575134277344
+  ]
+ },
+ {
+  "rhythm": "note_8",
+  "pitch": "A4",
+  "lift": "_",
+  "articulation": "_",
+  "slur": "_",
+  "position": "upper",
+  "coordinates": [
+   1183.2103271484375,
+   134.1396942138672
+  ]
+ },
+ {
+  "rhythm": "barline",
+  "pitch": ".",
+  "lift": ".",
+  "articulation": ".",
+  "slur": ".",
+  "position": ".",
+  "coordinates": [
+   1232.188232421875,
+   144.28590393066406
+  ]
+ }
+]

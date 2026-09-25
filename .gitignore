@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.venv/
+*.onnx
+*.npy
+.DS_Store
+# pages that may not be redistributed stay local
+test/fixtures/local/
+test/golden/local/

@@ -1,0 +1,16 @@
+homr-web is a port to TypeScript of homr, "Homer's Optical Music Recognition",
+by Christian Liebhardt, https://github.com/liebharc/homr, licensed under the
+GNU Affero General Public License version 3. This port reproduces homr
+release 0.7.0 (commit 8b5dcf7d7bdd1a47911dc0c661c573b957271eab) and is
+distributed under the same licence; see LICENSE.
+
+The models the port runs are homr's own, downloaded unchanged from the homr
+"onnx_checkpoints" release and identified by name and SHA-256 in
+test/golden/*/meta.json. homr builds on:
+
+- oemer, https://github.com/BreezeWhite/oemer, MIT licence: the
+  segmentation models.
+- Polyphonic-TrOMR, https://github.com/NetEase/Polyphonic-TrOMR, Apache
+  licence 2.0: the transformer.
+
+Their authors ask that research use cite them.

@@ -1,0 +1,42 @@
+{
+  "name": "homr-web",
+  "version": "0.0.0",
+  "description": "Browser port of homr, the optical music recognition engine: sheet music image in, MusicXML out, no server.",
+  "homepage": "https://github.com/jymen/homr-web",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jymen/homr-web.git"
+  },
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "NOTICE",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "check": "tsc --noEmit -p tsconfig.json",
+    "format": "biome check --write .",
+    "golden": ".venv/bin/python tools/dump-golden.py",
+    "lint": "biome check .",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.14",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.3",
+    "ultracite": "^7.12.0",
+    "vitest": "^3.2.4"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
