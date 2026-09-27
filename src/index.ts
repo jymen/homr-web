@@ -1,6 +1,7 @@
 /**
  * homr-web public surface. Phase 1: the data model every later phase reads
- * and writes, and the golden-fixture boundary. No algorithm yet.
+ * and writes, and the golden-fixture boundary. Phase 2 adds the model
+ * manifest, the runtime, the store and the session. No algorithm yet.
  */
 
 export const HOMR_VERSION = "0.7.0" as const;
@@ -15,6 +16,13 @@ export * from "./model/constants.js";
 export * from "./model/pipeline.js";
 export * from "./model/staff.js";
 export * from "./model/symbols.js";
+export * from "./models/backend.js";
+export * from "./models/cache.js";
+export * from "./models/dtype.js";
+export * from "./models/errors.js";
+export * from "./models/manifest.js";
+export * from "./models/session.js";
+export * from "./models/store.js";
 export * from "./result.js";
 export * from "./transformer/symbol.js";
 export * from "./transformer/vocabulary.js";

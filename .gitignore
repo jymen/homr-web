@@ -7,3 +7,6 @@ dist/
 # pages that may not be redistributed stay local
 test/fixtures/local/
 test/golden/local/
+# self-hosted model artifacts, fetched by tools/fetch-models.sh, never committed.
+# Anchored: an unanchored "models/" also matches src/models/, the library code.
+/models/

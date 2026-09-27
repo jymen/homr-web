@@ -14,7 +14,27 @@
   "overrides": [
     {
       "includes": ["tools/**", "bench/**"],
-      "linter": { "rules": { "suspicious": { "noConsole": "off" } } }
+      "linter": {
+        "rules": {
+          "suspicious": { "noConsole": "off" },
+          // gen-manifest.mjs opens the eight models one at a time on purpose:
+          // eight concurrent sessions would hold every model's wasm arena at once.
+          "performance": { "noAwaitInLoops": "off" }
+        }
+      }
+    },
+    {
+      // dtype.ts is the one module in src/ that is bit-level arithmetic, which
+      // is why it is its own file. Bitwise operators are its subject, and a
+      // half's fields are a 16-bit pattern: 0x7c00 is one exponent mask, where
+      // 0x7c_00 would group it at the byte boundary instead of the 5/10 split.
+      "includes": ["src/models/dtype.ts", "test/dtype.test.ts"],
+      "linter": {
+        "rules": {
+          "style": { "useNumericSeparators": "off" },
+          "suspicious": { "noBitwiseOperators": "off" }
+        }
+      }
     },
     {
       // A library needs one entry point that re-exports its modules.
