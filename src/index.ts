@@ -1,3 +1,20 @@
-/** The homr release this port reproduces; see README.md for the model hashes. */
+/**
+ * homr-web public surface. Phase 1: the data model every later phase reads
+ * and writes, and the golden-fixture boundary. No algorithm yet.
+ */
+
 export const HOMR_VERSION = "0.7.0" as const;
 export const HOMR_COMMIT = "8b5dcf7d7bdd1a47911dc0c661c573b957271eab" as const;
+
+export * from "./geometry/boxes.js";
+export * from "./golden/decode.js";
+export * from "./golden/page.js";
+export * from "./image/numeric.js";
+export * from "./image/plane.js";
+export * from "./model/constants.js";
+export * from "./model/pipeline.js";
+export * from "./model/staff.js";
+export * from "./model/symbols.js";
+export * from "./result.js";
+export * from "./transformer/symbol.js";
+export * from "./transformer/vocabulary.js";

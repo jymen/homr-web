@@ -237,6 +237,19 @@ def dump(image_path: Path, config: Config) -> None:
     (out / "meta.json").write_text(json.dumps(meta, indent=1) + "\n")
 
 
+def dump_vocabulary() -> None:
+    """The six decoder vocabularies, token to index, from the installed homr.
+    Written once beside the fixtures rather than per fixture: they belong to
+    the pinned model, not to a page."""
+    from homr.transformer.vocabulary import Vocabulary
+
+    vocabulary = Vocabulary()
+    heads = ("rhythm", "pitch", "lift", "articulation", "slur", "position")
+    data = {head: getattr(vocabulary, head) for head in heads}
+    GOLDEN.mkdir(parents=True, exist_ok=True)
+    (GOLDEN / "vocabulary.json").write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n")
+
+
 def main() -> None:
     download_weights(segnet_use_gpu=False, transformer_use_gpu=False, coreml_encoder=False)
     config = Config()
@@ -245,6 +258,7 @@ def main() -> None:
     pages = [Path(p).resolve() for p in sys.argv[1:]] or sorted(FIXTURES.glob("*.png")) + sorted(
         (FIXTURES / "local").glob("*.png")
     )
+    dump_vocabulary()
     for page in pages:
         dump(page, config)
 

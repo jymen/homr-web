@@ -7,10 +7,14 @@ and no server is involved: the segmentation and transformer models run on
 the musician's own machine through onnxruntime-web, on WebGPU where the
 browser has it and on WebAssembly elsewhere.
 
-**Status: phase 0.** The repository holds the scaffold, the pinned Python
-oracle and the golden fixtures; nothing of homr is ported yet. The plan is
-in the AbcMusicStudio repository under `docs/homr-web-plan/` and moves here
-with phase 1.
+**Status: phase 1.** The repository holds the scaffold, the pinned Python
+oracle, the golden fixtures, and the data model every later phase reads and
+writes: planes (the byte-per-pixel image layout opencv.js wraps without a
+copy), rotated boxes with homr's angle normalisation, staffs and symbols,
+the six decoder vocabularies, and the decoders that turn a golden dump into
+those types while checking every derived value Python stored. No algorithm
+is ported yet. The design record is `docs/design/phase-1-types.md`; the
+phase plan is in the AbcMusicStudio repository under `docs/homr-web-plan/`.
 
 ## What this reproduces
 
@@ -33,6 +37,19 @@ with its golden data in `test/golden/local/`. The dumper and the tests
 handle both directories the same way, so CI runs on the public pages and a
 developer's machine on all of them. Details in `test/fixtures/SOURCE.md`.
 
+## Layout
+
+```
+src/image/        plane.ts (Mask, GrayImage, ClassMap, ColorImage and the numpy-shaped helpers), numeric.ts (Python round, //, str(float), numpy median/std)
+src/geometry/     boxes.ts (PointList, RotatedRect, RotatedBox, Ellipse, AxisBox)
+src/model/        staff.ts, symbols.ts, pipeline.ts, constants.ts (model.py's data, the stage contracts)
+src/transformer/  vocabulary.ts (generated tables), symbol.ts (EncodedSymbol)
+src/golden/       decode.ts (Python dump to domain types, with derivation checks), page.ts (one fixture behind one object)
+src/result.ts     what recognizePage will answer with
+test/             one test file per module, golden.test.ts over every fixture
+tools/            venv.sh, dump-golden.py, gen-vocabulary.mjs
+```
+
 ## How the port is tested
 
 Every stage of homr's pipeline is a function from arrays to arrays.
@@ -45,6 +62,7 @@ so a tolerance accepted in one stage cannot hide a defect in the next.
 ```bash
 PYTHON=python3.12 ./tools/venv.sh   # once: homr 0.7.0 in .venv, fp32 models
 npm run golden                       # regenerate test/golden from test/fixtures
+node tools/gen-vocabulary.mjs        # then refresh the token tables in src/transformer/vocabulary.ts
 npm ci && npm run check && npm run lint && npm test
 ```
 

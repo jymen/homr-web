@@ -15,6 +15,15 @@
     {
       "includes": ["tools/**", "bench/**"],
       "linter": { "rules": { "suspicious": { "noConsole": "off" } } }
+    },
+    {
+      // A library needs one entry point that re-exports its modules.
+      "includes": ["src/index.ts"],
+      "linter": {
+        "rules": {
+          "performance": { "noBarrelFile": "off", "noReExportAll": "off" }
+        }
+      }
     }
   ]
 }
