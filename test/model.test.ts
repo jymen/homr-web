@@ -15,7 +15,7 @@ import {
   createStaffPoint,
   lastLineY,
   lineCount,
-  ModelError,
+  StaffError,
   yTolerance,
 } from "../src/model/staff.js";
 import {
@@ -58,8 +58,8 @@ describe("staff points and staffs", () => {
       space: "page",
     });
     expect(yTolerance(staff)).toBe(44);
-    expect(() => createStaffPoint(0, [1, 2, 3], 0)).toThrow(ModelError);
-    expect(() => createStaff([])).toThrow(ModelError);
+    expect(() => createStaffPoint(0, [1, 2, 3], 0)).toThrow(StaffError);
+    expect(() => createStaff([])).toThrow(StaffError);
   });
   it("sorts a multi staff by minY", () => {
     const low = createStaff([
@@ -71,7 +71,7 @@ describe("staff points and staffs", () => {
     expect(createMultiStaff([low, high]).staffs.map((s) => s.minY)).toEqual([
       100, 300,
     ]);
-    expect(() => createMultiStaff([])).toThrow(ModelError);
+    expect(() => createMultiStaff([])).toThrow(StaffError);
   });
 });
 

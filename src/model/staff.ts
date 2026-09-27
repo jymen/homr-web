@@ -25,7 +25,8 @@ import { mean, median } from "../image/numeric.js";
 import { LINES_PER_STAFF, MAX_LEDGER_LINES } from "./constants.js";
 import type { SymbolOnStaff } from "./symbols.js";
 
-export class ModelError extends Error {}
+/** A staff or multi-staff that cannot exist. Named for what it is about, as PlaneError, GoldenError and VocabularyError are; phase 2's src/models/ owns the separate ModelError. */
+export class StaffError extends Error {}
 
 export const COORDINATE_SPACES = { canvas: "canvas", page: "page" } as const;
 export type CoordinateSpace =
@@ -71,7 +72,7 @@ export function createStaffPoint(
   angle: number
 ): StaffPoint {
   if (y.length !== LINES_PER_STAFF && y.length !== 2 * LINES_PER_STAFF) {
-    throw new ModelError(
+    throw new StaffError(
       `a staff point needs 5 or 10 line ordinates, got ${y.length}`
     );
   }
@@ -142,7 +143,7 @@ export function createStaff(
 ): Staff {
   const [first, ...rest] = grid;
   if (first === undefined) {
-    throw new ModelError("a staff needs at least one grid point");
+    throw new StaffError("a staff needs at least one grid point");
   }
   const last = rest.at(-1) ?? first;
   let minY = Number.POSITIVE_INFINITY;
@@ -191,7 +192,7 @@ export function createMultiStaff(
   const sorted = [...staffs].sort((a, b) => a.minY - b.minY);
   const [first, ...rest] = sorted;
   if (first === undefined) {
-    throw new ModelError("a multi staff needs at least one staff");
+    throw new StaffError("a multi staff needs at least one staff");
   }
   return { connections, staffs: [first, ...rest] };
 }
