@@ -8,17 +8,23 @@ import {
   createAxisBox,
   filterPoints,
   GeometryError,
+  hasValidRectSize,
+  legacyConventionRectOf,
+  legacyFromFitEllipse,
   normalizeRotatedRect,
   pointAt,
   pointCount,
   pointListFromInt32,
   pointListFromPairs,
   polygonOf,
+  rawFitEllipseRectOf,
+  rawMinAreaRectOf,
   rectKey,
   rotatedBoxFromParts,
   rotatedRectOf,
   sameRect,
   sortPointsByX,
+  toLegacyAngleConvention,
 } from "../src/geometry/boxes.js";
 
 describe("normalizeRotatedRect (AngledBoundingBox.__init__)", () => {
@@ -56,7 +62,7 @@ describe("normalizeRotatedRect (AngledBoundingBox.__init__)", () => {
       { angle: -45, h: 4, w: 10 },
     ],
   ])("normalises %o", (raw, expected) => {
-    const rect = normalizeRotatedRect(raw);
+    const rect = normalizeRotatedRect(legacyConventionRectOf(raw));
     expect([rect.w, rect.h, rect.angle]).toEqual([
       expected.w,
       expected.h,
@@ -71,8 +77,84 @@ describe("normalizeRotatedRect (AngledBoundingBox.__init__)", () => {
   });
 });
 
+/**
+ * The sweep phase-4-findings.md measured: identical integer corner sets given
+ * to both builds at a known true rotation, `js` what @techstark/opencv-js
+ * 4.12.0 answered and `python` what opencv-python 4.14.0 did. The conversion
+ * has to turn the first into the second, dimensions included.
+ */
+const CONVENTION_SWEEP = [
+  { js: 90, python: -90, rotation: 0, swapped: false },
+  { js: 9.926, python: -80.074, rotation: 10, swapped: true },
+  { js: 45, python: -45, rotation: 45, swapped: true },
+  { js: 80.074, python: -9.926, rotation: 80, swapped: true },
+  { js: 90, python: -90, rotation: 90, swapped: false },
+] as const;
+
+const jsMinAreaRect = (angle: number) =>
+  rawMinAreaRectOf({
+    angle,
+    center: { x: 3, y: 5 },
+    size: { height: 20, width: 7 },
+  });
+
+describe("toLegacyAngleConvention", () => {
+  it.each(CONVENTION_SWEEP)(
+    "at a true rotation of $rotation turns $js into $python",
+    ({ js, python, swapped }) => {
+      const rect = toLegacyAngleConvention(jsMinAreaRect(js));
+      expect(rect.angle).toBeCloseTo(python, 10);
+      expect([rect.w, rect.h]).toEqual(swapped ? [20, 7] : [7, 20]);
+      expect([rect.cx, rect.cy]).toEqual([3, 5]);
+    }
+  );
+
+  it.each([
+    [45, -45, true],
+    [90, -90, false],
+    [-45, -45, false],
+    [-90, -90, false],
+  ])(
+    "converts %d to exactly %d, swapping the dimensions: %s",
+    (js, expected, swapped) => {
+      const rect = toLegacyAngleConvention(jsMinAreaRect(js));
+      expect(rect.angle).toBe(expected);
+      expect([rect.w, rect.h]).toEqual(swapped ? [20, 7] : [7, 20]);
+    }
+  );
+
+  it("leaves a fitEllipse rect alone, angle and dimensions", () => {
+    const raw = rawFitEllipseRectOf({
+      angle: 67.928,
+      center: { x: 3, y: 5 },
+      size: { height: 20, width: 7 },
+    });
+    expect(legacyFromFitEllipse(raw)).toEqual({
+      angle: 67.928,
+      cx: 3,
+      cy: 5,
+      h: 20,
+      w: 7,
+    });
+  });
+});
+
+describe("hasValidRectSize (_has_box_valid_size)", () => {
+  it.each([
+    [{ angle: 0, cx: 0, cy: 0, h: 2, w: 1 }, true],
+    [{ angle: 0, cx: 0, cy: 0, h: 2, w: 0 }, false],
+    [{ angle: 0, cx: 0, cy: 0, h: 0, w: 1 }, false],
+    [{ angle: 0, cx: 0, cy: 0, h: 2, w: Number.NaN }, false],
+    [{ angle: 0, cx: 0, cy: 0, h: Number.NaN, w: 1 }, false],
+  ])("reads %o as %s", (rect, expected) => {
+    expect(hasValidRectSize(rect)).toBe(expected);
+  });
+});
+
 describe("derived geometry", () => {
-  const rect = normalizeRotatedRect({ angle: 30, cx: 10, cy: 20, h: 6, w: 4 });
+  const rect = normalizeRotatedRect(
+    legacyConventionRectOf({ angle: 30, cx: 10, cy: 20, h: 6, w: 4 })
+  );
   it("corners ignore the angle, as homr's do", () => {
     expect(cornersOf(rect)).toEqual({
       bottomLeft: { x: 8, y: 23 },
@@ -82,13 +164,9 @@ describe("derived geometry", () => {
     });
   });
   it("equality and hashing follow the triple", () => {
-    const same = normalizeRotatedRect({
-      angle: 30,
-      cx: 10,
-      cy: 20,
-      h: 6,
-      w: 4,
-    });
+    const same = normalizeRotatedRect(
+      legacyConventionRectOf({ angle: 30, cx: 10, cy: 20, h: 6, w: 4 })
+    );
     expect(sameRect(rect, same)).toBe(true);
     expect(rectKey(rect)).toBe(rectKey(same));
     expect(sameRect(rect, { ...rect, angle: 31 })).toBe(false);

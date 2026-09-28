@@ -1,9 +1,9 @@
 /**
- * Port of the data half of homr's bounding_boxes.py. The methods
- * (overlap tests, merging, thickening, Hough lines) arrive in phase 4 as
- * free functions in this same file, together with the constructors that
- * need opencv.js (boxPoints, ellipse2Poly); the DebugDrawable hierarchy and
- * every draw method are not ported.
+ * Port of the data half of homr's bounding_boxes.py, plus the pure arithmetic
+ * that decides what a rotated rect means: the angle-convention ladder and
+ * homr's own normalisation. Everything that needs opencv.js to fit or redraw a
+ * shape is in src/cv/box*.ts, the grouping is in src/geometry/boxMerge.ts, and
+ * the DebugDrawable hierarchy and every draw method are not ported.
  *
  * The shapes are plain readonly objects so they cross the Worker boundary
  * by structured clone and compare structurally in tests. homr's __eq__ and
@@ -11,6 +11,8 @@
  * sameRect and rectKey; the Python `in` and set membership that depend on
  * them are ported through those two.
  */
+
+import type { RotatedRect as CvNativeRect } from "@techstark/opencv-js";
 
 // Points and point lists
 
@@ -129,14 +131,114 @@ export interface RotatedRectParams {
   readonly w: number;
 }
 
+declare const rawMinAreaRectBrand: unique symbol;
+
 /**
- * What cv.minAreaRect and cv.fitEllipse return, before homr touches it.
- * Angle range depends on the producer: (0, 90] for minAreaRect on OpenCV
- * 4.5.1 and later, [0, 180) for fitEllipse. Values are float32-exact (cv2
- * computes in float), which matters when a threshold is compared against
- * them; see the plan's testing.md.
+ * cv.minAreaRect's result, untouched. @techstark/opencv-js 4.12.0 reports the
+ * angle in (0, 90] -- the post-4.5.1 convention -- where opencv-python 4.x
+ * reports it in [-90, 0), and homr's geometry is written against the latter.
+ * The only thing to do with one of these is toLegacyAngleConvention.
  */
-export type CvRotatedRect = RotatedRectParams;
+export type RawMinAreaRect = RotatedRectParams & {
+  readonly [rawMinAreaRectBrand]: true;
+};
+
+declare const rawFitEllipseBrand: unique symbol;
+
+/**
+ * cv.fitEllipse's result, untouched. Angle in [0, 180) in both builds:
+ * measured 2026-09-28 on all 81 Kesh noteheads against opencv-python 4.14.0,
+ * worst delta exactly 0 on centre, size and angle. So a fitEllipse rect must
+ * *not* be converted, and that is why the two producers carry different brands
+ * instead of sharing one "raw cv rect" type -- converting this one would
+ * corrupt it as surely as leaving a minAreaRect one alone.
+ */
+export type RawFitEllipseRect = RotatedRectParams & {
+  readonly [rawFitEllipseBrand]: true;
+};
+
+declare const legacyConventionBrand: unique symbol;
+
+/**
+ * A rect in the convention homr was written against. normalizeRotatedRect and
+ * cv.boxPoints see this, never a raw producer's result, and the three ways to
+ * obtain one are named below.
+ */
+export type LegacyConventionRect = RotatedRectParams & {
+  readonly [legacyConventionBrand]: true;
+};
+
+export function rawMinAreaRectOf(native: CvNativeRect): RawMinAreaRect {
+  return {
+    angle: native.angle,
+    cx: native.center.x,
+    cy: native.center.y,
+    h: native.size.height,
+    w: native.size.width,
+  } as RawMinAreaRect;
+}
+
+export function rawFitEllipseRectOf(native: CvNativeRect): RawFitEllipseRect {
+  return {
+    angle: native.angle,
+    cx: native.center.x,
+    cy: native.center.y,
+    h: native.size.height,
+    w: native.size.width,
+  } as RawFitEllipseRect;
+}
+
+/**
+ * opencv.js's minAreaRect angle convention to opencv-python's: subtract 90 and
+ * swap w with h, while the angle is at or above zero.
+ *
+ * homr's own normalisation absorbs the difference almost everywhere, because a
+ * rectangle at -90 and one at +90 normalise alike. It does not absorb it at
+ * exactly +-45, where homr's comparisons are strict, so +45 stays +45 while
+ * -45 stays -45 with the dimensions the other way round: 86 of 717 golden
+ * rotated-box entries disagreed before this conversion existed and none after.
+ *
+ * A loop and not an `if`, because an angle of exactly 90 needs two iterations:
+ * the two swaps cancel and the result is -90 with the size unchanged, which is
+ * what opencv-python reports for an axis-aligned rect. The loop is also why no
+ * range check guards it -- an angle already in [-90, 0) passes through
+ * untouched, so a pre-4.5.1 build would still be handled correctly and a check
+ * would only refuse it.
+ */
+export function toLegacyAngleConvention(
+  raw: RawMinAreaRect
+): LegacyConventionRect {
+  let { angle, h, w } = raw;
+  while (angle >= 0) {
+    angle -= 90;
+    [w, h] = [h, w];
+  }
+  return { angle, cx: raw.cx, cy: raw.cy, h, w } as LegacyConventionRect;
+}
+
+/**
+ * A relabel, not a computation: fitEllipse's angle never changed across the
+ * 4.5.1 split. It is a function rather than a cast at the call site so that a
+ * future measurement saying otherwise has one body to change.
+ */
+export function legacyFromFitEllipse(
+  raw: RawFitEllipseRect
+): LegacyConventionRect {
+  const { angle, cx, cy, h, w } = raw;
+  return { angle, cx, cy, h, w } as LegacyConventionRect;
+}
+
+/**
+ * For numbers that were already in opencv-python's convention when they were
+ * written down: the hand-authored rects in the tests. Not a third producer of
+ * measured values -- everything fitted here comes through
+ * toLegacyAngleConvention or legacyFromFitEllipse.
+ */
+export function legacyConventionRectOf(
+  params: RotatedRectParams
+): LegacyConventionRect {
+  return params as LegacyConventionRect;
+}
 
 declare const normalizedBrand: unique symbol;
 
@@ -160,7 +262,9 @@ export type RotatedRect = RotatedRectParams & {
   readonly [normalizedBrand]: true;
 };
 
-export function normalizeRotatedRect(raw: RotatedRectParams): RotatedRect {
+export function normalizeRotatedRect(
+  raw: LegacyConventionRect | RotatedRect
+): RotatedRect {
   const { cx, cy, w, h } = raw;
   let { angle } = raw;
   let width = w;
@@ -189,6 +293,17 @@ export function assertNormalizedRect(rect: RotatedRectParams): RotatedRect {
     );
   }
   return rect as RotatedRect;
+}
+
+/**
+ * homr's _has_box_valid_size. Applied to the raw fit before the convention
+ * conversion, as Python does; the conversion only swaps the dimensions, so the
+ * answer is the same either side of it.
+ */
+export function hasValidRectSize(rect: RotatedRectParams): boolean {
+  return (
+    !(Number.isNaN(rect.w) || Number.isNaN(rect.h)) && rect.w > 0 && rect.h > 0
+  );
 }
 
 /**
@@ -381,10 +496,12 @@ export function sizeOf(box: AnyBox): {
 }
 
 /**
- * RotatedBoundingBox.to_bounding_box and BoundingEllipse's inherited one:
- * the axis-aligned corners truncated to int, contour and id carried over.
+ * RotatedBoundingBox.to_bounding_box: the axis-aligned corners truncated to
+ * int, contour and id carried over. Rotated boxes only -- BoundingEllipse does
+ * not inherit this, the method is defined on RotatedBoundingBox and not on
+ * AngledBoundingBox, so an Ellipse never reaches it in homr either.
  */
-export function axisBoxOf(box: RotatedBox | Ellipse): AxisBox {
+export function axisBoxOf(box: RotatedBox): AxisBox {
   const corners = cornersOf(box.rect);
   return createAxisBox(
     Math.trunc(corners.topLeft.x),

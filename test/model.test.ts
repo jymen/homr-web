@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  legacyConventionRectOf,
   normalizeRotatedRect,
   pointListFromPairs,
   rotatedBoxFromParts,
@@ -77,7 +78,9 @@ describe("staff points and staffs", () => {
 
 describe("symbols", () => {
   it("creates symbols centred on their box and transforms only the centre", () => {
-    const rect = normalizeRotatedRect({ angle: 0, cx: 5, cy: 7, h: 20, w: 2 });
+    const rect = normalizeRotatedRect(
+      legacyConventionRectOf({ angle: 0, cx: 5, cy: 7, h: 20, w: 2 })
+    );
     const box = rotatedBoxFromParts(
       rect,
       pointListFromPairs([]),
