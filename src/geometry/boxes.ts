@@ -417,8 +417,11 @@ export interface AxisBox {
   readonly y2: number;
 }
 
+/** homr's AngledBoundingBox: the two shapes that carry a rect and an outline. */
+export type AngledBox = RotatedBox | Ellipse;
+
 /** Anything homr's is_overlapping accepts on either side. */
-export type AnyBox = RotatedBox | Ellipse | AxisBox;
+export type AnyBox = AngledBox | AxisBox;
 
 /** Assembles a rotated box from parts homr already computed (the golden decoder, and phase 4 after boxPoints). */
 export function rotatedBoxFromParts(
