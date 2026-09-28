@@ -482,6 +482,30 @@ export function polygonOf(box: AnyBox): PointList {
   return box.polygon;
 }
 
+/**
+ * homr's _can_shapes_possibly_touch: the centres are no further apart than the
+ * sum of the two longer sides.
+ *
+ * Not the circumscribing radius, so not a conservative bound either -- it can
+ * reject a pair that does touch. It is what homr does, and the merge grouping
+ * depends on the answer.
+ *
+ * Math.sqrt where Python writes `** 0.5`, which is libm's pow: for an exponent
+ * of 0.5 both are the correctly rounded square root on every platform this runs
+ * on, and JavaScript's `**` carries no such guarantee.
+ */
+export function canShapesPossiblyTouch(a: AnyBox, b: AnyBox): boolean {
+  const first = rotatedRectOf(a);
+  const second = rotatedRectOf(b);
+  const dx = first.cx - second.cx;
+  const dy = first.cy - second.cy;
+  const distance = Math.sqrt(dx * dx + dy * dy);
+  return !(
+    distance >
+    Math.max(first.w, first.h) + Math.max(second.w, second.h)
+  );
+}
+
 export function centerOf(box: AnyBox): Point {
   const rect = rotatedRectOf(box);
   return { x: rect.cx, y: rect.cy };
