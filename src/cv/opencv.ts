@@ -76,15 +76,22 @@ export type OpenCvSource = () => Promise<AcquiredOpenCv>;
  */
 const REQUIRED_MEMBERS = [
   "boundingRect",
+  "boxPoints",
   "calcHist",
   "CLAHE",
   "contourArea",
   "cvtColor",
+  "dilate",
+  "ellipse2Poly",
   "findContours",
+  "fitEllipse",
   "Mat",
   "matFromArray",
   "MatVector",
+  "minAreaRect",
   "morphologyEx",
+  "pointPolygonTest",
+  "PointVector",
   "Size",
   "threshold",
 ] as const;

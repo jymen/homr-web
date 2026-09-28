@@ -20,18 +20,25 @@ import { nodeOpenCvSource, testOpenCv } from "./support/opencv.js";
 const ACQUISITION_FAILED = new Error("the opencv.js bundle could not be read");
 const SCOPE_BODY_FAILED = new Error("the operation inside the scope failed");
 /** Pins the order REQUIRED_MEMBERS is written in, which is what makes a wrong-build message reproducible. */
-const NAMES_EVERY_MISSING_MEMBER = /no boundingRect, calcHist, CLAHE/;
+const NAMES_EVERY_MISSING_MEMBER = /no boundingRect, boxPoints, calcHist/;
 const PORT_MEMBERS = [
   "boundingRect",
+  "boxPoints",
   "calcHist",
   "CLAHE",
   "contourArea",
   "cvtColor",
+  "dilate",
+  "ellipse2Poly",
   "findContours",
+  "fitEllipse",
   "Mat",
   "matFromArray",
   "MatVector",
+  "minAreaRect",
   "morphologyEx",
+  "pointPolygonTest",
+  "PointVector",
   "Size",
   "threshold",
 ];

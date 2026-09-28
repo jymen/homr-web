@@ -25,10 +25,12 @@
  *
  * A Mat is filled by writing `mat.data`, a live view of the wasm heap, rather
  * than through `matFromArray`, which takes a JS array: the page is 26 MB and
- * `Array.from` of it is 8.7 million boxed numbers for no gain.
+ * `Array.from` of it is 8.7 million boxed numbers for no gain. That crossing is
+ * cv/mat-plane.ts's planeToMat.
  */
 
 import type { Mat } from "@techstark/opencv-js";
+import { planeToMat } from "../cv/mat-plane.js";
 import {
   loadOpenCv,
   type MatScope,
@@ -72,17 +74,6 @@ export interface PaperRect {
   readonly width: number;
   readonly x: number;
   readonly y: number;
-}
-
-/**
- * A BGR page's bytes in the wasm heap. `mat.data` is a fresh view on each read,
- * so it is taken immediately after the allocation that could have grown the heap
- * and moved it.
- */
-function matOfPlane(cv: OpenCv, scope: MatScope, image: ColorImage): Mat {
-  const mat = scope.keep(new cv.Mat(image.height, image.width, cv.CV_8UC3));
-  mat.data.set(image.data);
-  return mat;
 }
 
 /**
@@ -135,7 +126,7 @@ function dominantBlueValue(cv: OpenCv, scope: MatScope, src: Mat): number {
  */
 export function findPaperRect(image: ColorImage, cv: OpenCv): PaperRect | null {
   return withMatScope((scope) => {
-    const src = matOfPlane(cv, scope, image);
+    const src = planeToMat(cv, scope, image);
     const dominant = dominantBlueValue(cv, scope, src);
     const gray = scope.keep(new cv.Mat());
     cv.cvtColor(src, gray, cv.COLOR_BGR2GRAY);
@@ -238,7 +229,7 @@ export function autocrop(image: ColorImage, cv: OpenCv): ColorImage {
  */
 export function applyClahe(image: ColorImage, cv: OpenCv): GrayImage {
   return withMatScope((scope) => {
-    const src = matOfPlane(cv, scope, image);
+    const src = planeToMat(cv, scope, image);
     const gray = scope.keep(new cv.Mat());
     cv.cvtColor(src, gray, cv.COLOR_BGR2GRAY);
     // cv.Size is a plain JS object here, not an embind instance, so it is the
