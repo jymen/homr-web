@@ -201,3 +201,43 @@ phase 4 owns 4 boxes and 5 coordinates and the other 14 belong to phase 5's
 coordinates are exactly integers, so a 1e-2 bound accepts 95.3 % of them for free.
 In all five cases phase 4 owns, the port computes the exact integer and Python's
 float32 landed just below it.
+
+## Correction, measured during the port: the polygon difference is a formula
+## change in OpenCV, not the rect
+
+Two claims above are wrong, and the port could not reproduce
+`boxes-staff_fragments.json` until they were retested.
+
+**"The cause is the rect itself, 1e-4 away between the two builds."** For 3 of
+the 18 inexact corners it is not: those entries' rects are bit-identical, centre,
+size and angle, and the polygon still differs by one pixel on one corner. No
+tolerance conditioned on the stored rect can admit them, which is what the
+synthesis's fork 4 asks for.
+
+**"Hand-rolling `boxPoints` from OpenCV's C++ formula in float32 matched 0 of
+967."** It matches everything, once the right formula is used. OpenCV's
+`RotatedRect::points` derives the first two corners from the centre, the angle
+and the size; the older form then *reflects* the other two through the centre
+(`pt[2] = 2 * centre - pt[0]`), while opencv-python 4.14.0 derives all four
+directly. On a bit-identical rect the reflection can land exactly on an integer
+where the direct form lands 3e-5 below it, and `int()` then differs by one.
+
+Measured 2026-09-28 over every entry of the four rotated golden lists whose raw
+`minAreaRect` is bit-identical between the builds (131 + 359 + 2 + 103 = 595 of
+634), comparing floats and not truncations:
+
+| claim | result |
+|---|---|
+| `cv.boxPoints` (opencv.js 4.12.0) equals the reflecting formula in float32 | 595 / 595 |
+| the direct formula in float32 equals opencv-python 4.14.0's `boxPoints` | 595 / 595 |
+| `cv.boxPoints` equals opencv-python 4.14.0's `boxPoints` | 591 / 595 |
+
+So `cv.boxPoints` is not the right call for this port and `src/cv/box-fitting.ts`
+reimplements the direct formula. With it, phase 4's own five lists reproduce as
+81/81, 147/147, 7/7, 377/377 and 103/103, every polygon bit-exact except one
+`stems_rest` corner whose rect is genuinely inexact, and the fork 4 tolerance is
+unchanged.
+
+**Phase 5 inherits the rest.** `boxes-staff_fragments-broken.json` goes from 326
+to 328 of 340 polygons exact under the direct formula, so 12 remain and they are
+`break_wide_fragments`' to explain, not this one's.

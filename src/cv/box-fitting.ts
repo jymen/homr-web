@@ -35,37 +35,56 @@ import {
   rotatedBoxFromParts,
   toLegacyAngleConvention,
 } from "../geometry/boxes.js";
-import { truncToInt } from "../image/numeric.js";
+import { toFloat32, truncToInt } from "../image/numeric.js";
 import { pointListToMat } from "./mat-points.js";
 import type { MatScope, OpenCv } from "./opencv.js";
 
 /** homr's min_length_to_fit_ellipse: "this is a requirement by opencv". */
 export const MIN_POINTS_TO_FIT_ELLIPSE = 5;
 
-const nativeRectOf = (rect: RotatedRectParams) => ({
-  angle: rect.angle,
-  center: { x: rect.cx, y: rect.cy },
-  size: { height: rect.h, width: rect.w },
-});
-
 /**
- * `cv2.boxPoints(box).astype(np.int64)`. The rect may be pre- or
- * post-normalisation: boxPoints has no convention of its own, it draws a
- * rectangle from concrete numbers.
+ * `cv2.boxPoints(box).astype(np.int64)`, reimplemented in float32 rather than
+ * called, because the two builds do not compute it the same way.
  *
- * Not reimplementable. A hand-rolled float32 version of OpenCV's own C++
- * formula matched 0 of 967 golden entries, while this call plus truncation
- * matches 949 exactly and the remaining 18 by one pixel on one corner.
+ * OpenCV's RotatedRect::points derives the first two corners from the centre,
+ * the angle and the size; the older form then *reflects* the other two through
+ * the centre, `pt[2] = 2 * centre - pt[0]`, and opencv-python 4.14.0 derives all
+ * four directly. On a bit-identical rect the reflection can land exactly on an
+ * integer where the direct form lands 3e-5 below it, and Python's int() then
+ * differs by one: 4 coordinates of 5072 on the Kesh page, 3 of them in
+ * staff_fragments entries whose *stored* rect is bit-exact, so nothing in the
+ * stored data explains the difference and no rect-conditioned tolerance can
+ * admit it.
+ *
+ * Measured 2026-09-28 over every entry of the four rotated golden lists whose
+ * raw rect is bit-identical between the builds, 595 of 634: this reproduces
+ * opencv-python 4.14.0's floats 595 of 595, and cv.boxPoints reproduces the
+ * older reflecting form 595 of 595. phase-4-findings.md's "hand-rolling
+ * boxPoints from OpenCV's C++ formula in float32 matched 0 of 967" does not
+ * hold.
+ *
+ * The rect may be pre- or post-normalisation: this has no convention of its
+ * own, it draws a rectangle from concrete numbers. float32 at every step, as the
+ * C++ is; halving a float32 is exact, so only the products and sums are rounded.
  */
-export function polygonViaBoxPoints(
-  cv: OpenCv,
-  rect: RotatedRectParams
-): PointList {
-  return pointListFromPairs(
-    cv
-      .boxPoints(nativeRectOf(rect))
-      .map((corner): readonly [number, number] => [corner.x, corner.y])
-  );
+export function polygonViaBoxPoints(rect: RotatedRectParams): PointList {
+  const radians = (rect.angle * Math.PI) / 180;
+  const halfSin = toFloat32(Math.sin(radians)) * 0.5;
+  const halfCos = toFloat32(Math.cos(radians)) * 0.5;
+  const sinH = toFloat32(halfSin * rect.h);
+  const cosW = toFloat32(halfCos * rect.w);
+  const cosH = toFloat32(halfCos * rect.h);
+  const sinW = toFloat32(halfSin * rect.w);
+  const left = toFloat32(rect.cx - sinH);
+  const right = toFloat32(rect.cx + sinH);
+  const upper = toFloat32(rect.cy - cosH);
+  const lower = toFloat32(rect.cy + cosH);
+  return pointListFromPairs([
+    [toFloat32(left - cosW), toFloat32(lower - sinW)],
+    [toFloat32(right - cosW), toFloat32(upper - sinW)],
+    [toFloat32(right + cosW), toFloat32(upper + sinW)],
+    [toFloat32(left + cosW), toFloat32(lower + sinW)],
+  ]);
 }
 
 /**
@@ -108,14 +127,13 @@ function minAreaRectOf(
 }
 
 function rotatedBoxOf(
-  cv: OpenCv,
   rect: LegacyConventionRect,
   contour: PointList,
   debugId: number
 ): RotatedBox {
   return rotatedBoxFromParts(
     normalizeRotatedRect(rect),
-    polygonViaBoxPoints(cv, rect),
+    polygonViaBoxPoints(rect),
     contour,
     debugId
   );
@@ -147,7 +165,7 @@ export function fitRotatedRect(
   if (!hasValidRectSize(raw)) {
     return null;
   }
-  return rotatedBoxOf(cv, toLegacyAngleConvention(raw), contour, debugId);
+  return rotatedBoxOf(toLegacyAngleConvention(raw), contour, debugId);
 }
 
 /**
@@ -163,7 +181,6 @@ export function fitRotatedRectUnchecked(
   debugId: number
 ): RotatedBox {
   return rotatedBoxOf(
-    cv,
     toLegacyAngleConvention(minAreaRectOf(cv, scope, contour)),
     contour,
     debugId
@@ -206,7 +223,6 @@ export function refitRotatedBoxFromGroup(
 ): RotatedBox {
   const contour = concatPointLists(group.map((box) => box.contour));
   return rotatedBoxOf(
-    cv,
     toLegacyAngleConvention(minAreaRectOf(cv, scope, contour)),
     contour,
     0

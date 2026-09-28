@@ -90,9 +90,8 @@ describe("makeBoxThicker", () => {
 });
 
 describe("the taller family", () => {
-  it("turns an ellipse into a rotated box, as BoundingEllipse.make_box_taller does", async () => {
-    const cv = await testOpenCv();
-    const taller = makeBoxTaller(cv, ellipse(30, 40, 10, 6), 4);
+  it("turns an ellipse into a rotated box, as BoundingEllipse.make_box_taller does", () => {
+    const taller = makeBoxTaller(ellipse(30, 40, 10, 6), 4);
     expect(taller.kind).toBe("rotated");
     expect(taller.rect).toEqual({ angle: 0, cx: 30, cy: 40, h: 10, w: 10 });
     expect(Array.from(taller.polygon)).toEqual([
@@ -100,16 +99,15 @@ describe("the taller family", () => {
     ]);
   });
 
-  it("keeps the centre by flooring the half thickness, also for a negative one", async () => {
-    const cv = await testOpenCv();
-    expect(makeBoxTallerKeepCenter(cv, box(10, 20, 4, 6), 5).rect).toEqual({
+  it("keeps the centre by flooring the half thickness, also for a negative one", () => {
+    expect(makeBoxTallerKeepCenter(box(10, 20, 4, 6), 5).rect).toEqual({
       angle: 0,
       cx: 10,
       cy: 18,
       h: 11,
       w: 4,
     });
-    expect(makeBoxTallerKeepCenter(cv, box(10, 20, 4, 6), -5).rect).toEqual({
+    expect(makeBoxTallerKeepCenter(box(10, 20, 4, 6), -5).rect).toEqual({
       angle: 0,
       cx: 10,
       cy: 23,
@@ -120,16 +118,14 @@ describe("the taller family", () => {
 });
 
 describe("the remaining mutators", () => {
-  it("moves the centre horizontally and redraws the outline", async () => {
-    const cv = await testOpenCv();
-    const moved = moveToXHorizontalBy(cv, box(10, 20, 4, 6), -10);
+  it("moves the centre horizontally and redraws the outline", () => {
+    const moved = moveToXHorizontalBy(box(10, 20, 4, 6), -10);
     expect(moved.rect.cx).toBe(0);
     expect(Array.from(moved.polygon)).toEqual([-2, 23, -2, 17, 2, 17, 2, 23]);
   });
 
-  it("raises each dimension to its floor and leaves the rest alone", async () => {
-    const cv = await testOpenCv();
-    const grown = ensureMinDimension(cv, box(10, 20, 2, 9, 30), 3, 3);
+  it("raises each dimension to its floor and leaves the rest alone", () => {
+    const grown = ensureMinDimension(box(10, 20, 2, 9, 30), 3, 3);
     expect(grown.rect).toEqual({ angle: 30, cx: 10, cy: 20, h: 9, w: 3 });
   });
 });
@@ -220,13 +216,42 @@ describe("the fitting entry points", () => {
   });
 
   /**
+   * staff_fragments[9] of the Kesh page, whose raw rect is bit-identical between
+   * the two builds: opencv-python 4.14.0 answers
+   * [[585.9998779296875, 1155.9998779296875], [190.99996948242188,
+   * 1155.9998779296875], [190.99996948242188, 1150.9998779296875],
+   * [585.9998779296875, 1150.9998779296875]] and the stored polygon truncates
+   * that to x = 190 at corner 2. cv.boxPoints on 4.12.0 answers exactly 191
+   * there, reflecting the corner through the centre instead of deriving it, so
+   * the golden entry is unreachable through that call.
+   */
+  it("derives every corner rather than reflecting two, where cv.boxPoints reflects", async () => {
+    const cv = await testOpenCv();
+    const measured = legacyConventionRectOf({
+      angle: -90,
+      cx: 388.499_938_964_843_75,
+      cy: 1153.499_877_929_687_5,
+      h: 394.999_938_964_843_75,
+      w: 4.999_999_046_325_684,
+    });
+    expect(Array.from(polygonViaBoxPoints(measured))).toEqual([
+      585, 1155, 190, 1155, 190, 1150, 585, 1150,
+    ]);
+    const reflected = cv.boxPoints({
+      angle: measured.angle,
+      center: { x: measured.cx, y: measured.cy },
+      size: { height: measured.h, width: measured.w },
+    });
+    expect(reflected[2]?.x).toBe(191);
+  });
+
+  /**
    * The same quadrilateral as the fitted box above, starting at a different
    * corner. That is why the polygon is stored rather than derived: recomputing
    * it from the normalised rect draws the right shape in the wrong sequence.
    */
-  it("starts the point sequence elsewhere when handed the normalised rect", async () => {
-    const cv = await testOpenCv();
-    expect(Array.from(polygonViaBoxPoints(cv, rect(20, 15, 20, 10)))).toEqual([
+  it("starts the point sequence elsewhere when handed the normalised rect", () => {
+    expect(Array.from(polygonViaBoxPoints(rect(20, 15, 20, 10)))).toEqual([
       10, 20, 10, 10, 30, 10, 30, 20,
     ]);
   });

@@ -32,7 +32,7 @@ function rebuilt<B extends AngledBox>(
   const polygon =
     box.kind === "ellipse"
       ? polygonViaEllipse2Poly(cv, scope, rect)
-      : polygonViaBoxPoints(cv, rect);
+      : polygonViaBoxPoints(rect);
   return { ...box, polygon, rect } as B;
 }
 
@@ -75,15 +75,11 @@ export function makeBoxThicker<B extends AngledBox>(
  * is_intersecting exists only on the rotated class. The return type carries
  * that so no comment has to defend it at the call site.
  */
-export function makeBoxTaller(
-  cv: OpenCv,
-  box: AngledBox,
-  thickness: number
-): RotatedBox {
+export function makeBoxTaller(box: AngledBox, thickness: number): RotatedBox {
   const rect = { ...box.rect, h: box.rect.h + thickness } as RotatedRect;
   return rotatedBoxFromParts(
     rect,
-    polygonViaBoxPoints(cv, rect),
+    polygonViaBoxPoints(rect),
     box.contour,
     box.debugId
   );
@@ -91,7 +87,6 @@ export function makeBoxTaller(
 
 /** make_box_taller_keep_center: `cy - thickness // 2`, floor division, so -5 gives -3. */
 export function makeBoxTallerKeepCenter(
-  cv: OpenCv,
   box: RotatedBox,
   thickness: number
 ): RotatedBox {
@@ -102,28 +97,26 @@ export function makeBoxTallerKeepCenter(
   } as RotatedRect;
   return rotatedBoxFromParts(
     rect,
-    polygonViaBoxPoints(cv, rect),
+    polygonViaBoxPoints(rect),
     box.contour,
     box.debugId
   );
 }
 
 export function moveToXHorizontalBy(
-  cv: OpenCv,
   box: RotatedBox,
   xDelta: number
 ): RotatedBox {
   const rect = { ...box.rect, cx: box.rect.cx + xDelta } as RotatedRect;
   return rotatedBoxFromParts(
     rect,
-    polygonViaBoxPoints(cv, rect),
+    polygonViaBoxPoints(rect),
     box.contour,
     box.debugId
   );
 }
 
 export function ensureMinDimension(
-  cv: OpenCv,
   box: RotatedBox,
   minWidth: number,
   minHeight: number
@@ -135,7 +128,7 @@ export function ensureMinDimension(
   } as RotatedRect;
   return rotatedBoxFromParts(
     rect,
-    polygonViaBoxPoints(cv, rect),
+    polygonViaBoxPoints(rect),
     box.contour,
     box.debugId
   );
