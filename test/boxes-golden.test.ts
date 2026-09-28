@@ -26,26 +26,40 @@ import { predictSymbols } from "../src/pipeline/predict-symbols.js";
 import { goldenPageOf, listGoldenFixtures } from "./support/golden.js";
 import { testOpenCv } from "./support/opencv.js";
 
-/** The golden file each list is compared against, and the name Python logs it under. */
+/** Each list: the name Python logs it under, where the port puts it, and its golden file. */
 const LISTS = [
-  ["noteheads", (page: GoldenPage) => page.noteheads()],
-  ["staff_fragments", (page: GoldenPage) => page.boxes("staffFragments")],
-  ["clefs_keys", (page: GoldenPage) => page.boxes("clefsKeys")],
-  ["stems_rest", (page: GoldenPage) => page.boxes("stemsRest")],
-  ["bar_lines", (page: GoldenPage) => page.boxes("barLines")],
+  [
+    "noteheads",
+    (symbols: PredictedSymbols) => symbols.noteheads,
+    (page: GoldenPage) => page.noteheads(),
+  ],
+  [
+    "staff_fragments",
+    (symbols: PredictedSymbols) => symbols.staffFragments,
+    (page: GoldenPage) => page.boxes("staffFragments"),
+  ],
+  [
+    "clefs_keys",
+    (symbols: PredictedSymbols) => symbols.clefsKeys,
+    (page: GoldenPage) => page.boxes("clefsKeys"),
+  ],
+  [
+    "stems_rest",
+    (symbols: PredictedSymbols) => symbols.stemsRest,
+    (page: GoldenPage) => page.boxes("stemsRest"),
+  ],
+  [
+    "bar_lines",
+    (symbols: PredictedSymbols) => symbols.barLines,
+    (page: GoldenPage) => page.boxes("barLines"),
+  ],
 ] as const satisfies ReadonlyArray<
-  readonly [keyof never & string, (page: GoldenPage) => AngledBox[]]
+  readonly [
+    string,
+    (symbols: PredictedSymbols) => readonly AngledBox[],
+    (page: GoldenPage) => readonly AngledBox[],
+  ]
 >;
-
-const GOT_BY_LABEL: Readonly<
-  Record<string, (symbols: PredictedSymbols) => readonly AngledBox[]>
-> = {
-  bar_lines: (symbols) => symbols.barLines,
-  clefs_keys: (symbols) => symbols.clefsKeys,
-  noteheads: (symbols) => symbols.noteheads,
-  staff_fragments: (symbols) => symbols.staffFragments,
-  stems_rest: (symbols) => symbols.stemsRest,
-};
 
 const filteredMasks = (page: GoldenPage): SegmentationMasks => ({
   clefsKeys: page.mask("clefsKeys", true),
@@ -71,14 +85,10 @@ for (const fixture of listGoldenFixtures()) {
   };
 
   describe(`predict_symbols ${fixture.name}`, () => {
-    for (const [label, expected] of LISTS) {
+    for (const [label, actual, expected] of LISTS) {
       it(`reproduces ${label}`, async () => {
         const symbols = await symbolsOf();
-        const report = compareBoxLists(
-          label,
-          GOT_BY_LABEL[label]?.(symbols) ?? [],
-          expected(page)
-        );
+        const report = compareBoxLists(label, actual(symbols), expected(page));
         process.stdout.write(`${describeBoxComparison(report)}\n`);
         assertBoxListMatches(report);
         expect(report.contoursExact).toBe(report.count.want);
