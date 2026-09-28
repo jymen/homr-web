@@ -10,6 +10,7 @@ export const HOMR_COMMIT = "8b5dcf7d7bdd1a47911dc0c661c573b957271eab" as const;
 export * from "./cv/mat-plane.js";
 export * from "./cv/mat-points.js";
 export * from "./cv/opencv.js";
+export * from "./geometry/box-merge.js";
 export * from "./geometry/boxes.js";
 export * from "./golden/decode.js";
 export * from "./golden/page.js";
