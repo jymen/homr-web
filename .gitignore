@@ -10,3 +10,6 @@ test/golden/local/
 # self-hosted model artifacts, fetched by tools/fetch-models.sh, never committed.
 # Anchored: an unanchored "models/" also matches src/models/, the library code.
 /models/
+
+# agent spikes: prototypes that prove a port before it becomes library code
+.scratch/

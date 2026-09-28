@@ -6,15 +6,18 @@
  */
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { PNG } from "pngjs";
 import {
   createGoldenPage,
   type GoldenPage,
+  type GoldenPng,
   type GoldenReader,
 } from "../../src/golden/page.js";
+import { type ColorImage, colorImageFromRgba } from "../../src/image/plane.js";
 
 const goldenRoot = join(import.meta.dirname, "..", "golden");
+const fixtureRoot = join(import.meta.dirname, "..", "fixtures");
 
 export interface GoldenFixture {
   /** test/golden/<name> or test/golden/local/<name>. */
@@ -34,18 +37,10 @@ export function listGoldenFixtures(): GoldenFixture[] {
   return [...fixturesIn(goldenRoot), ...fixturesIn(join(goldenRoot, "local"))];
 }
 
-/** pngjs hands back RGBA whatever the file's depth; the golden PNGs are gray, so channel 0 is the pixel. */
-function decodePng(bytes: Uint8Array): {
-  width: number;
-  height: number;
-  gray: Uint8Array;
-} {
+/** pngjs hands back RGBA whatever the file's depth, which is exactly what GoldenPng wants. */
+function decodePng(bytes: Uint8Array): GoldenPng {
   const png = PNG.sync.read(Buffer.from(bytes));
-  const gray = new Uint8Array(png.width * png.height);
-  for (let i = 0; i < gray.length; i += 1) {
-    gray[i] = png.data[i * 4] ?? 0;
-  }
-  return { gray, height: png.height, width: png.width };
+  return { height: png.height, rgba: png.data, width: png.width };
 }
 
 export function readerFor(fixture: GoldenFixture): GoldenReader {
@@ -57,6 +52,22 @@ export function readerFor(fixture: GoldenFixture): GoldenReader {
 
 export function goldenPageOf(fixture: GoldenFixture): GoldenPage {
   return createGoldenPage(readerFor(fixture));
+}
+
+/**
+ * The fixture page itself as BGR: what `cv2.imread` hands autocrop, and the one
+ * stage input that is not a golden file. Same pngjs decode and
+ * colorImageFromRgba as the golden reader, so the two can only differ by file.
+ */
+export function fixtureImageOf(fixture: GoldenFixture): ColorImage {
+  const inLocal = basename(dirname(fixture.dir)) === "local";
+  const file = `${fixture.name}.png`;
+  const png = decodePng(
+    readFileSync(
+      inLocal ? join(fixtureRoot, "local", file) : join(fixtureRoot, file)
+    )
+  );
+  return colorImageFromRgba(png.width, png.height, png.rgba);
 }
 
 export function readGoldenJson(name: string): unknown {

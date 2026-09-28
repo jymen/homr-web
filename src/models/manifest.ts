@@ -174,7 +174,10 @@ export const MODEL_ROLES = {
 /**
  * The two things a Backend used to decide at once. They travel together in
  * production and are separable in fact: both segnet artifacts run on the wasm
- * execution provider (measured, 159 ms fp32 and 177 ms fp16 per tile under Node
+ * execution provider (measured; a single tile under Node on one wasm thread was
+ * 159 ms fp32 and 177 ms fp16 on 2026-09-27, but phase 3 could not reproduce
+ * those figures in any configuration and saw 878 to 1705 ms per tile on a page,
+ * so treat them as unverified and take the bench's numbers instead
  * on one thread), which is how CI covers the fp16 branch with no GPU and how
  * the bench A/Bs precision against provider on one machine.
  */

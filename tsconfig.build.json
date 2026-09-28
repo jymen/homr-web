@@ -4,7 +4,10 @@
     "noEmit": false,
     "outDir": "dist",
     "rootDir": "src",
-    "types": []
+    // Node's globals must not leak into a browser library, but @webgpu/types
+    // declares the GPUAdapter and navigator.gpu that backend.ts probes, so an
+    // empty list breaks the build while check passes on tsconfig.json's wider set.
+    "types": ["@webgpu/types"]
   },
   "include": ["src"]
 }

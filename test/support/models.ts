@@ -8,16 +8,29 @@
  * skipped test proves nothing and nobody notices it. CI gets the strict half:
  * test/store.test.ts asserts models/ is present whenever process.env.CI is set,
  * so absent bytes fail there instead of looking like a pass.
+ *
+ * The store wiring below it lives here rather than in one test file because
+ * test/session.test.ts and test/segment.test.ts both open the real artifacts off
+ * disk, and a second copy of `storeOn` is how the two would drift into opening
+ * them under different placements.
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe } from "vitest";
+import { type ModelRuntime, startRuntime } from "../../src/models/backend.js";
+import { memoryCache } from "../../src/models/cache.js";
 import {
   ARTIFACT_IDS,
   ARTIFACTS,
   type ArtifactRecord,
+  type Placement,
 } from "../../src/models/manifest.js";
+import {
+  type FetchBytes,
+  type ModelEvent,
+  ModelStore,
+} from "../../src/models/store.js";
 
 export const FETCH_MODELS_HINT = "models/ absent, run tools/fetch-models.sh";
 
@@ -55,4 +68,45 @@ export function describeWithModels(title: string, suite: () => void): void {
     return;
   }
   describe.skip(`${title} (${FETCH_MODELS_HINT})`, suite);
+}
+
+export const CPU: Placement = { artifactsFor: "wasm", provider: "wasm" };
+/** The fp16 artifacts on the WebAssembly provider: the axis split that lets CI cover the fp16 branch with no GPU present. */
+export const FP16_ON_WASM: Placement = {
+  artifactsFor: "webgpu",
+  provider: "wasm",
+};
+
+export const wasmRuntime = (): Promise<ModelRuntime> =>
+  startRuntime({ maxBackend: "wasm" });
+
+/** models/ read here and not in the library: phase 1 set the precedent that node:fs lives behind an injected port. */
+export const localModels =
+  (): FetchBytes =>
+  ({ url }) =>
+    Promise.resolve(
+      new Uint8Array(
+        readFileSync(`${modelsDir()}/${url.slice(url.lastIndexOf("/") + 1)}`)
+      )
+    );
+
+export const storeOn = async (
+  placement: Placement,
+  onEvent?: (event: ModelEvent) => void
+): Promise<ModelStore> =>
+  new ModelStore({
+    baseUrl: "file:///models/",
+    cache: memoryCache(),
+    fetchBytes: localModels(),
+    placement,
+    runtime: await wasmRuntime(),
+    ...(onEvent === undefined ? {} : { onEvent }),
+  });
+
+/** The one-liner every models test needs against noUncheckedIndexedAccess: a missing fixture or output is the test's own failure, not a narrowing to carry around. */
+export function required<T>(value: T | undefined, what: string): T {
+  if (value === undefined) {
+    throw new Error(`the test needs ${what}`);
+  }
+  return value;
 }

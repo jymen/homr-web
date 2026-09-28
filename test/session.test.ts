@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { Tensor } from "onnxruntime-web";
 import { describe, expect, it } from "vitest";
 import {
@@ -7,7 +6,6 @@ import {
   planeAgreement,
 } from "../src/image/plane.js";
 import { SEGNET_INPUT } from "../src/model/pipeline.js";
-import { type ModelRuntime, startRuntime } from "../src/models/backend.js";
 import { memoryCache } from "../src/models/cache.js";
 import { encodeFloat16Array } from "../src/models/dtype.js";
 import { ModelError } from "../src/models/errors.js";
@@ -25,32 +23,25 @@ import {
   readFloat32,
   sessionOptionsFor,
 } from "../src/models/session.js";
-import {
-  type FetchBytes,
-  type ModelEvent,
-  ModelStore,
-} from "../src/models/store.js";
+import { type ModelEvent, ModelStore } from "../src/models/store.js";
 import { BACKENDS } from "../src/result.js";
 import { goldenPageOf, listGoldenFixtures } from "./support/golden.js";
-import { describeWithModels, modelsDir } from "./support/models.js";
+import {
+  CPU,
+  describeWithModels,
+  FP16_ON_WASM,
+  localModels,
+  required,
+  storeOn,
+  wasmRuntime,
+} from "./support/models.js";
 
 const NO_BATCH_DIMENSION = /declares no batch dimension/;
 const NO_SUCH_INPUT = /declares no input named/;
 const NOT_PAIRED = /does not pair/;
 
-const CPU: Placement = { artifactsFor: "wasm", provider: "wasm" };
-/** The fp16 artifacts on the WebAssembly provider: the axis split that lets CI cover the fp16 branch with no GPU present. */
-const FP16_ON_WASM: Placement = { artifactsFor: "webgpu", provider: "wasm" };
-
 const planOn = (role: ModelRole, placement: Placement) =>
   resolveRole(DEFAULT_CATALOG, role, placement);
-
-function required<T>(value: T | undefined, what: string): T {
-  if (value === undefined) {
-    throw new Error(`the test needs ${what}`);
-  }
-  return value;
-}
 
 describe("sessionOptionsFor over every role, backend and provider", () => {
   const combinations: { placement: Placement; role: ModelRole }[] = [];
@@ -130,32 +121,6 @@ describe("sessionOptionsFor over every role, backend and provider", () => {
     expect(sessionOptionsFor(decoder).freeDimensionOverrides).toBeUndefined();
   });
 });
-
-const wasmRuntime = (): Promise<ModelRuntime> =>
-  startRuntime({ maxBackend: "wasm" });
-
-/** models/ read here and not in the library: phase 1 set the precedent that node:fs lives behind an injected port. */
-const localModels =
-  (): FetchBytes =>
-  ({ url }) =>
-    Promise.resolve(
-      new Uint8Array(
-        readFileSync(`${modelsDir()}/${url.slice(url.lastIndexOf("/") + 1)}`)
-      )
-    );
-
-const storeOn = async (
-  placement: Placement,
-  onEvent?: (event: ModelEvent) => void
-): Promise<ModelStore> =>
-  new ModelStore({
-    baseUrl: "file:///models/",
-    cache: memoryCache(),
-    fetchBytes: localModels(),
-    placement,
-    runtime: await wasmRuntime(),
-    ...(onEvent === undefined ? {} : { onEvent }),
-  });
 
 /** A short `context`: four positions of the encoder's 512 channels, which is all handoff() looks at. */
 const CONTEXT_STEPS = 4;

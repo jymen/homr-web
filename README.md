@@ -7,14 +7,28 @@ and no server is involved: the segmentation and transformer models run on
 the musician's own machine through onnxruntime-web, on WebGPU where the
 browser has it and on WebAssembly elsewhere.
 
-**Status: phase 1.** The repository holds the scaffold, the pinned Python
-oracle, the golden fixtures, and the data model every later phase reads and
-writes: planes (the byte-per-pixel image layout opencv.js wraps without a
-copy), rotated boxes with homr's angle normalisation, staffs and symbols,
-the six decoder vocabularies, and the decoders that turn a golden dump into
-those types while checking every derived value Python stored. No algorithm
-is ported yet. The design record is `docs/design/phase-1-types.md`; the
-phase plan is in the AbcMusicStudio repository under `docs/homr-web-plan/`.
+**Status: phase 3, the library half.** The first real algorithm is ported and
+it reproduces homr exactly. A page goes through autocrop, PIL's bicubic resize
+and CLAHE to byte-identical output, is tiled the way homr tiles it, and comes
+back out of the segmentation model as the five masks, which agree with homr's
+own **pixel for pixel** on the test page rather than merely within the
+tolerance the plan allows. It runs in a Worker, on onnxruntime-web, with no
+server.
+
+Underneath that: phase 1's data model (planes, rotated boxes with homr's angle
+normalisation, staffs and symbols, the six decoder vocabularies, and the
+decoders that turn a golden dump into those types while checking every derived
+value Python stored), and phase 2's model layer (a generated manifest of the
+eight artifacts with their hashes, the runtime probe that picks WebGPU or
+WebAssembly, the verifying store and cache, and the sessions).
+
+Not yet done in phase 3: the bench page, the browser, and the WebGPU timings
+the plan's go/no-go gate needs. Nothing after segmentation is ported at all, so
+there is no MusicXML yet.
+
+The design records are `docs/design/phase-1-types.md`,
+`phase-2-models.md` and `phase-3-segnet.md`; the phase plan is in the
+AbcMusicStudio repository under `docs/homr-web-plan/`.
 
 ## What this reproduces
 
@@ -43,11 +57,14 @@ developer's machine on all of them. Details in `test/fixtures/SOURCE.md`.
 src/image/        plane.ts (Mask, GrayImage, ClassMap, ColorImage and the numpy-shaped helpers), numeric.ts (Python round, //, str(float), numpy median/std)
 src/geometry/     boxes.ts (PointList, RotatedRect, RotatedBox, Ellipse, AxisBox)
 src/model/        staff.ts, symbols.ts, pipeline.ts, constants.ts (model.py's data, the stage contracts)
+src/models/       manifest.ts (generated), backend.ts (the runtime probe), store.ts, cache.ts, session.ts, dtype.ts (the fp16 codec)
+src/cv/           opencv.ts (the loader and Mat lifetime), default-source.ts (opencv.js in its own chunk)
+src/segmentation/ preprocess.ts (autocrop, resize, CLAHE), resize.ts (PIL's bicubic in fixed point), tiles.ts (the grid and the merge), segment.ts, worker.ts
 src/transformer/  vocabulary.ts (generated tables), symbol.ts (EncodedSymbol)
 src/golden/       decode.ts (Python dump to domain types, with derivation checks), page.ts (one fixture behind one object)
 src/result.ts     what recognizePage will answer with
 test/             one test file per module, golden.test.ts over every fixture
-tools/            venv.sh, dump-golden.py, gen-vocabulary.mjs
+tools/            venv.sh, dump-golden.py, gen-vocabulary.mjs, gen-manifest.mjs, fetch-models.sh
 ```
 
 ## How the port is tested

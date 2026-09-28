@@ -37,6 +37,57 @@
       }
     },
     {
+      // resize.ts reproduces PIL's fixed-point resample, where the closing
+      // `>> 22` is the arithmetic itself: a division by 2 ** 22 rounds where
+      // the shift truncates, which is a different function and a different
+      // byte. The accumulator's bias is written as a shift for the same reason.
+      "includes": ["src/segmentation/resize.ts"],
+      "linter": {
+        "rules": {
+          "suspicious": { "noBitwiseOperators": "off" }
+        }
+      }
+    },
+    {
+      // segmentPage awaits one session.run per batch inside the tile loop, and
+      // that is the design rather than an oversight: a page's tiles share one
+      // session and one wasm arena, and the batch is already the parallelism,
+      // bounded by the model's own pinned batch dimension. Running a page's
+      // seven batches together would hold 207 MB of input and logit tensors in
+      // that one arena instead of 30.
+      "includes": ["src/segmentation/segment.ts"],
+      "linter": {
+        "rules": {
+          "performance": { "noAwaitInLoops": "off" }
+        }
+      }
+    },
+    {
+      // opencv.js's module object arrives thenable, and its shim calls back with
+      // the module itself, so resolving a promise with it recurses without end.
+      // The loader clears the property, and the test drives a deliberate
+      // thenable to prove it stays cleared. The rule guards against making a
+      // thenable by accident; this feature's subject is unmaking one.
+      "includes": ["src/cv/opencv.ts", "test/opencv.test.ts"],
+      "linter": {
+        "rules": {
+          "suspicious": { "noThenProperty": "off" }
+        }
+      }
+    },
+    {
+      // @techstark/opencv-js has no default export, so a namespace import is the
+      // only static form, and static is the whole point here: an `import()`
+      // resolves its own promise with the namespace. The rule is about
+      // tree-shaking, which cannot reach inside a 10.9 MB emscripten bundle.
+      "includes": ["src/cv/default-source.ts"],
+      "linter": {
+        "rules": {
+          "performance": { "noNamespaceImport": "off" }
+        }
+      }
+    },
+    {
       // A library needs one entry point that re-exports its modules.
       "includes": ["src/index.ts"],
       "linter": {

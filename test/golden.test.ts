@@ -9,8 +9,13 @@ import { describe, expect, it } from "vitest";
 import { cornersOf, pointCount } from "../src/geometry/boxes.js";
 import { decodeVocabulary } from "../src/golden/decode.js";
 import { GOLDEN_BOX_FILES } from "../src/golden/page.js";
+import { roundHalfEven } from "../src/image/numeric.js";
 import { planeAgreement } from "../src/image/plane.js";
-import { ENCODER_CANVAS, MASK_CLASS_NAMES } from "../src/model/pipeline.js";
+import {
+  ENCODER_CANVAS,
+  MASK_CLASS_NAMES,
+  type MaskClass,
+} from "../src/model/pipeline.js";
 import { yTolerance } from "../src/model/staff.js";
 import { symbolsOfKind } from "../src/model/symbols.js";
 import { isDecodedSymbol, NEWLINE } from "../src/transformer/symbol.js";
@@ -40,6 +45,20 @@ const KNOWN_COUNTS: Record<
     stemsRest: 377,
   },
 };
+
+/**
+ * Which classes noise_filtering found nothing to filter on, measured per
+ * fixture when it was dumped: on a clean typeset page only the staff mask
+ * changes, and it changes because make_lines_stronger runs unconditionally.
+ * A photographed page would legitimately differ, so an unlisted fixture is
+ * only held to the staff assertion.
+ */
+const UNFILTERED_MASK_CLASSES: Record<string, readonly MaskClass[]> = {
+  "the-kesh-300dpi": ["symbols", "stemsRest", "notehead", "clefsKeys"],
+};
+
+/** resize.py's target_width; calc_target_image_size returns the page unchanged when it already matches. */
+const RESIZE_TARGET_WIDTH = 1920;
 
 for (const fixture of listGoldenFixtures()) {
   const page = goldenPageOf(fixture);
@@ -160,10 +179,37 @@ for (const fixture of listGoldenFixtures()) {
             preprocessed.width,
             preprocessed.height,
           ]);
-          expect(planeAgreement(mask, mask)).toBe(1);
         }
       }
       expect(page.musicXml()).toContain("<score-partwise");
+    });
+
+    it("serves the filtered masks as the different files they are", () => {
+      expect(
+        planeAgreement(page.mask("staff"), page.mask("staff", true))
+      ).toBeLessThan(1);
+      for (const name of UNFILTERED_MASK_CLASSES[fixture.name] ?? []) {
+        expect(planeAgreement(page.mask(name), page.mask(name, true))).toBe(1);
+      }
+    });
+
+    it("decodes the autocropped and resized pages in colour", () => {
+      const autocropped = page.autocropped();
+      const resized = page.resized();
+      expect([autocropped.kind, resized.kind]).toEqual(["bgr", "bgr"]);
+      expect(resized.width).toBe(RESIZE_TARGET_WIDTH);
+      expect(resized.height).toBe(
+        autocropped.width === RESIZE_TARGET_WIDTH
+          ? autocropped.height
+          : roundHalfEven(
+              (autocropped.height * RESIZE_TARGET_WIDTH) / autocropped.width
+            )
+      );
+      const preprocessed = page.preprocessed();
+      expect([resized.width, resized.height]).toEqual([
+        preprocessed.width,
+        preprocessed.height,
+      ]);
     });
 
     const known = KNOWN_COUNTS[fixture.name];

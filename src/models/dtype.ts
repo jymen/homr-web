@@ -5,8 +5,9 @@
  * docs/design/phase-2-models.md's "The half codec, and why phase 2 owns it"
  * argues why the codec lives here while the casts do not.
  *
- * This is the only module in the library holding bit-level arithmetic, and it
- * imports nothing.
+ * One of the two modules in the library holding bit-level arithmetic (the other
+ * is segmentation/resize.ts, which reproduces PIL's fixed-point resample), and
+ * the only one that imports nothing.
  */
 
 const HALF_SIGN = 0x8000;

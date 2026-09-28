@@ -11,7 +11,13 @@
  */
 
 import type { Ellipse, RotatedBox } from "../geometry/boxes.js";
-import { type GrayImage, type Mask, planeFromBytes } from "../image/plane.js";
+import {
+  type ColorImage,
+  colorImageFromRgba,
+  type GrayImage,
+  type Mask,
+  planeFromBytes,
+} from "../image/plane.js";
 import {
   ENCODER_CANVAS,
   MASK_CLASSES,
@@ -36,10 +42,15 @@ import {
   GoldenError,
 } from "./decode.js";
 
-/** A decoded PNG as one byte per pixel (the golden PNGs are 1-bit masks and 8-bit gray). */
+/**
+ * A decoded PNG as RGBA, four bytes per pixel. That is what both real
+ * readers already hold (pngjs on Node, a canvas in a browser) whatever the
+ * file's own depth, so it is the one representation at the boundary; gray
+ * and BGR are derived from it inside createGoldenPage.
+ */
 export interface GoldenPng {
-  readonly gray: Uint8Array;
   readonly height: number;
+  readonly rgba: Uint8Array;
   readonly width: number;
 }
 
@@ -69,6 +80,8 @@ export const GOLDEN_BOX_FILES = {
 export type GoldenBoxKind = keyof typeof GOLDEN_BOX_FILES;
 
 export interface GoldenPage {
+  /** autocropped.png: the page after autocrop, in BGR. */
+  readonly autocropped: () => ColorImage;
   readonly barLines: () => {
     readonly averageNoteHeadHeight: number;
     readonly barLines: RotatedBox[];
@@ -86,6 +99,8 @@ export interface GoldenPage {
   readonly noteheadsWithStems: () => NoteheadWithStem[];
   readonly notes: () => Note[];
   readonly preprocessed: () => GrayImage;
+  /** resized.png: the autocropped page resized to width 1920, in BGR. */
+  readonly resized: () => ColorImage;
   /** How many canvas-<n>.png files the page has: the staffs parsed, in parse order. */
   readonly staffCount: () => number;
   readonly staffPositions: () => StaffPosition[];
@@ -135,10 +150,32 @@ function isMeta(value: unknown): value is GoldenMeta {
 
 export function createGoldenPage(reader: GoldenReader): GoldenPage {
   const json = (name: string): unknown => JSON.parse(reader.text(name));
+  /** Channel 0 is the pixel: an 8-bit grayscale PNG decodes to R = G = B. */
   const gray = (name: string): GrayImage => {
     const png = reader.png(name);
-    return planeFromBytes("gray", png.width, png.height, png.gray);
+    const data = new Uint8Array(png.width * png.height);
+    for (let i = 0; i < data.length; i += 1) {
+      data[i] = png.rgba[i * 4] ?? 0;
+    }
+    return planeFromBytes("gray", png.width, png.height, data);
   };
+  const color = (name: string): ColorImage => {
+    const png = reader.png(name);
+    return colorImageFromRgba(png.width, png.height, png.rgba);
+  };
+  /**
+   * Keyed on the filename rather than on the class, because the raw and the
+   * filtered mask of one class are two different files and a key that cannot
+   * tell them apart is how `mask(name, true)` used to return the raw mask.
+   */
+  const maskOf = memoBy((file: string) => {
+    const png = reader.png(file);
+    const data = new Uint8Array(png.width * png.height);
+    for (let i = 0; i < data.length; i += 1) {
+      data[i] = (png.rgba[i * 4] ?? 0) > 0 ? 1 : 0;
+    }
+    return planeFromBytes("mask", png.width, png.height, data);
+  });
   const meta = memo(() => {
     const value = json("meta.json");
     if (!isMeta(value)) {
@@ -150,6 +187,7 @@ export function createGoldenPage(reader: GoldenReader): GoldenPage {
     () => meta().stages.filter((name) => CANVAS_FILE.test(name)).length
   );
   return {
+    autocropped: memo(() => color("autocropped.png")),
     barLines: memo(() =>
       decodeBarLines(json("barlines.json"), "barlines.json")
     ),
@@ -176,17 +214,10 @@ export function createGoldenPage(reader: GoldenReader): GoldenPage {
         `canvas-${index}-staff.json`
       )
     ),
-    mask: memoBy((key: string) => {
-      const [name, filtered] = key.split("|") as [MaskClass, string];
-      const png = reader.png(
-        `mask-${filtered === "1" ? "filtered-" : ""}${MASK_CLASSES[name].golden}.png`
-      );
-      const data = new Uint8Array(png.gray.length);
-      for (let i = 0; i < data.length; i += 1) {
-        data[i] = (png.gray[i] ?? 0) > 0 ? 1 : 0;
-      }
-      return planeFromBytes("mask", png.width, png.height, data);
-    }).bind(null) as never as GoldenPage["mask"],
+    mask: (name: MaskClass, filtered = false) =>
+      maskOf(
+        `mask-${filtered ? "filtered-" : ""}${MASK_CLASSES[name].golden}.png`
+      ),
     meta,
     multiStaffs: memo(() =>
       decodeMultiStaffs(json("multistaffs.json"), "multistaffs.json")
@@ -203,6 +234,7 @@ export function createGoldenPage(reader: GoldenReader): GoldenPage {
     ),
     notes: memo(() => decodeNotes(json("notes.json"), "notes.json")),
     preprocessed: memo(() => gray("preprocessed.png")),
+    resized: memo(() => color("resized.png")),
     staffCount,
     staffPositions: memo(() =>
       decodeStaffPositions(reader.text("staff-positions.txt"))

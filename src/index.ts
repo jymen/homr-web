@@ -7,6 +7,7 @@
 export const HOMR_VERSION = "0.7.0" as const;
 export const HOMR_COMMIT = "8b5dcf7d7bdd1a47911dc0c661c573b957271eab" as const;
 
+export * from "./cv/opencv.js";
 export * from "./geometry/boxes.js";
 export * from "./golden/decode.js";
 export * from "./golden/page.js";
@@ -24,5 +25,10 @@ export * from "./models/manifest.js";
 export * from "./models/session.js";
 export * from "./models/store.js";
 export * from "./result.js";
+export * from "./segmentation/preprocess.js";
+export * from "./segmentation/resize.js";
+export * from "./segmentation/segment.js";
+export * from "./segmentation/tiles.js";
+export * from "./segmentation/worker.js";
 export * from "./transformer/symbol.js";
 export * from "./transformer/vocabulary.js";
