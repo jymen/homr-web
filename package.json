@@ -22,6 +22,7 @@
     "README.md"
   ],
   "scripts": {
+    "bench": "npm run build && node bench/serve.mjs",
     "build": "tsc -p tsconfig.build.json",
     "check": "tsc --noEmit -p tsconfig.json",
     "format": "biome check --write .",
