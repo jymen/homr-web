@@ -187,10 +187,32 @@ export async function openModelSession(
 }
 
 /**
+ * A float16 tensor's data, when it is the elements themselves rather than their
+ * bit patterns. `Tensor.DataTypeMap` maps float16 to Uint16Array and has no
+ * Float16Array in it at all, so this is a parse of a value ort's own types say
+ * cannot exist, not a narrowing of one they describe. It is recognised by the
+ * constructor's name because Float16Array is a platform builtin: ort does not
+ * define it and cannot rename it.
+ */
+const isFloat16Array = (data: unknown): data is ArrayLike<number> =>
+  ArrayBuffer.isView(data) && data.constructor.name === "Float16Array";
+
+/**
  * Any output tensor as float32, wherever it lives and whatever it declares.
- * onnxruntime-web 1.30.0 has no Float16Array on either side of a run, so an
- * fp16 output arrives as a Uint16Array of raw half bit patterns (measured:
- * 17893, 18611, 18476 on a golden tile where the fp32 model gave 4.9, 7.5, 6.8).
+ *
+ * A float16 tensor's data arrives in one of two shapes, and which one is a
+ * property of the host rather than of onnxruntime. A realm with no Float16Array
+ * gets a Uint16Array of raw half bit patterns, which is what ort's own typings
+ * declare and what Node gives (measured: 17893, 18611, 18476 on a golden tile
+ * where the fp32 model gave 4.9, 7.5, 6.8). A realm that has one gets a real
+ * Float16Array whose elements are already the numbers, and every browser this
+ * port's WebGPU path runs on has had one since Chrome 135.
+ *
+ * Both are handled because the second is not optional: `placementOf` sends the
+ * webgpu backend to the fp16 segnet artifact, so a browser on that path reads
+ * every logit through here. Treating a Float16Array as bit patterns would not
+ * throw, it would return a page of noise, which is why the two are told apart
+ * rather than one being a fallback for the other.
  *
  * This is why phase 3's argmax, phase 7's logit heads and the bench page contain
  * no dtype code: the decode every one of them needs is one pass over the buffer,
@@ -205,13 +227,16 @@ export async function openModelSession(
 export async function readFloat32(tensor: Tensor): Promise<Float32Array> {
   const data = await tensor.getData();
   if (tensor.type === "float16") {
-    if (!(data instanceof Uint16Array)) {
-      throw new ModelError(
-        "unknown-tensor",
-        `a float16 tensor gave ${data.constructor.name}, not the Uint16Array of half patterns ort documents`
-      );
+    if (data instanceof Uint16Array) {
+      return decodeFloat16Array(data);
     }
-    return decodeFloat16Array(data);
+    if (isFloat16Array(data)) {
+      return new Float32Array(data);
+    }
+    throw new ModelError(
+      "unknown-tensor",
+      `a float16 tensor gave ${data.constructor.name}, neither the Uint16Array of half patterns ort declares nor a Float16Array`
+    );
   }
   if (data instanceof Float32Array) {
     return data;
