@@ -140,6 +140,22 @@ function kindsOf(events) {
   return [...counts].map(([kind, seen]) => `${kind}×${seen}`).join(" ");
 }
 
+/**
+ * ModelStore verifies an artifact's digest on every load, cache hits included,
+ * and phase 2 chose that on an 82 ms figure for 157 MB taken under Node. It
+ * names the browser figure as one this page owes, so the verified events are
+ * added up rather than only counted.
+ */
+function verifyMs(events) {
+  let total = 0;
+  for (const event of events) {
+    if (event.kind === "verified") {
+      total += event.ms;
+    }
+  }
+  return total;
+}
+
 async function sha256Of(data) {
   const digest = await crypto.subtle.digest("SHA-256", data);
   return Array.from(new Uint8Array(digest), (byte) =>
@@ -343,7 +359,7 @@ async function runAll() {
         `  ${run.cacheState}, open ${ms(run.modelOpenMs)}, preprocess ${ms(run.preprocessMs)}, segment ${ms(run.segmentMs)}, total ${ms(run.totalMs)}`
       );
       log(
-        `  downloaded ${count(run.downloadedBytes)} bytes, cached ${count(run.cachedBytes)} bytes, events ${kindsOf(run.events)}`
+        `  downloaded ${count(run.downloadedBytes)} bytes, cached ${count(run.cachedBytes)} bytes, verified in ${ms(verifyMs(run.events))}, events ${kindsOf(run.events)}`
       );
       logMasks(result);
       logAgreement(batch, result.classes);
