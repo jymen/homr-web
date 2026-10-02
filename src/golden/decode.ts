@@ -24,12 +24,29 @@ import {
   ellipseFromParts,
   type Point,
   type PointList,
+  pointCount,
   pointListFromPairs,
   type RotatedBox,
   type RotatedRect,
   rotatedBoxFromParts,
 } from "../geometry/boxes.js";
+import {
+  type RawStaff,
+  rawStaffContour,
+  rawStaffFromParts,
+} from "../geometry/raw-staffs.js";
+import {
+  createStaffAnchor,
+  type StaffAnchor,
+} from "../geometry/staff-anchors.js";
+import {
+  asFiveLines,
+  createStaffLineSegment,
+  type FiveLines,
+  type StaffLineSegment,
+} from "../geometry/staff-lines.js";
 import { diff, mean } from "../image/numeric.js";
+import { LINES_PER_STAFF } from "../model/constants.js";
 import {
   type CoordinateSpace,
   createMultiStaff,
@@ -751,4 +768,599 @@ export function decodeStaffPositions(text: string): StaffPosition[] {
         w: w ?? 0,
       };
     });
+}
+
+// Staff detection intermediates (phase 5). Anchors and raw staffs are built
+// through their own factories, so decoding asserts the fields those derive.
+
+function integerOf(value: unknown, path: string): number {
+  const n = asNumber(value, path);
+  if (!Number.isInteger(n)) {
+    throw new GoldenError(path, `expected an integer, got ${n}`);
+  }
+  return n;
+}
+
+/** The element of `list` a golden index names; the dumper writes object identity as a position in an earlier list. */
+function pick<T>(
+  list: readonly T[],
+  value: unknown,
+  path: string,
+  what: string
+): T {
+  const index = integerOf(value, path);
+  const item = list[index];
+  if (index < 0 || item === undefined) {
+    throw new GoldenError(
+      path,
+      `index ${index} is outside ${what} (${list.length} entries)`
+    );
+  }
+  return item;
+}
+
+function indicesInto(
+  value: unknown,
+  length: number,
+  path: string,
+  what: string
+): number[] {
+  return asArray(value, path).map((v, i) => {
+    const index = integerOf(v, `${path}[${i}]`);
+    if (index < 0 || index >= length) {
+      throw new GoldenError(
+        `${path}[${i}]`,
+        `index ${index} is outside ${what} (${length} entries)`
+      );
+    }
+    return index;
+  });
+}
+
+function assertDistinct(list: readonly number[], path: string): void {
+  if (new Set(list).size !== list.length) {
+    throw new GoldenError(path, "an index appears twice");
+  }
+}
+
+/** Five staff lines, each the fragments of one StaffLineSegment in the segment's own order. */
+function fiveLinesOf(
+  value: unknown,
+  fragments: readonly RotatedBox[],
+  path: string
+): FiveLines {
+  const lines = asArray(value, path).map((line, i) => {
+    const at = `${path}[${i}]`;
+    const picked = asArray(line, at).map((v, k) =>
+      pick(fragments, v, `${at}[${k}]`, "the fragment list")
+    );
+    let segment: StaffLineSegment;
+    try {
+      segment = createStaffLineSegment(picked);
+    } catch (error) {
+      throw goldenErrorAt(at, error);
+    }
+    if (segment.fragments.some((fragment, k) => fragment !== picked[k])) {
+      throw new GoldenError(at, "fragments are not ascending in centre x");
+    }
+    return segment;
+  });
+  const five = asFiveLines(lines);
+  if (five === null) {
+    throw new GoldenError(
+      path,
+      `expected ${LINES_PER_STAFF} lines, got ${lines.length}`
+    );
+  }
+  return five;
+}
+
+/**
+ * One StaffAnchor, rebuilt by createStaffAnchor from its lines and its symbol.
+ * averageUnitSize, minY, maxY and the zone are asserted against what Python
+ * stored, so decoding the file tests the constructor.
+ */
+function staffAnchorOf(
+  json: unknown,
+  fragments: readonly RotatedBox[],
+  path: string
+): StaffAnchor {
+  const object = asObject(json, path);
+  const anchor = createStaffAnchor(
+    fiveLinesOf(field(object, "lines", path), fragments, `${path}.lines`),
+    decodeRotatedBox(field(object, "symbol", path), `${path}.symbol`)
+  );
+  const stored = (name: string) =>
+    asNumber(field(object, name, path), `${path}.${name}`);
+  assertClose(
+    anchor.averageUnitSize,
+    stored("averageUnitSize"),
+    path,
+    "averageUnitSize (mean of the four gaps at the symbol's x)"
+  );
+  assertClose(anchor.minY, stored("minY"), path, "minY");
+  assertClose(anchor.maxY, stored("maxY"), path, "maxY");
+  const [start, stop] = pair(field(object, "zone", path), `${path}.zone`);
+  if (start !== anchor.zone.start || stop !== anchor.zone.stop) {
+    throw new GoldenError(
+      `${path}.zone`,
+      `the port derives [${anchor.zone.start}, ${anchor.zone.stop}], Python stored [${start}, ${stop}]`
+    );
+  }
+  return anchor;
+}
+
+/** One column zone of predict_other_anchors_from_clefs. */
+export interface GoldenClefZone {
+  /** find_horizontal_lines over the zone's columns: the row of each line of every complete group of five. */
+  readonly lines: readonly (readonly number[])[];
+  /** Python's `range(start, stop)` of columns. */
+  readonly start: number;
+  readonly stop: number;
+}
+
+/**
+ * staff-anchors.json. Lines arrive as indices into
+ * boxes-staff_fragments-broken.json, so the decoded anchors hold the very box
+ * objects `fragments` does, and a stage fed these anchors and that list sees
+ * one set of fragments, as Python's stage did.
+ */
+export interface GoldenStaffAnchors {
+  /** find_staff_anchors over the bar-line boxes. */
+  readonly barLines: StaffAnchor[];
+  /** find_staff_anchors over clefs_keys. */
+  readonly clefs: StaffAnchor[];
+  /** What filter_unusual_anchors kept of clefs + otherClefs + barLines: the same objects, in that order. */
+  readonly kept: StaffAnchor[];
+  /** predict_other_anchors_from_clefs. */
+  readonly otherClefSymbols: RotatedBox[];
+  /** find_staff_anchors over otherClefSymbols. */
+  readonly otherClefs: StaffAnchor[];
+  /** init_zone, and find_horizontal_lines over each zone's columns. Empty when no clef anchor was found. */
+  readonly zones: GoldenClefZone[];
+}
+
+export function decodeStaffAnchors(
+  json: unknown,
+  fragments: readonly RotatedBox[],
+  path = "$"
+): GoldenStaffAnchors {
+  const object = asObject(json, path);
+  const anchorsOf = (name: string): StaffAnchor[] =>
+    asArray(field(object, name, path), `${path}.${name}`).map((v, i) =>
+      staffAnchorOf(v, fragments, `${path}.${name}[${i}]`)
+    );
+  const clefs = anchorsOf("clefs");
+  const otherClefs = anchorsOf("otherClefs");
+  const barLines = anchorsOf("barLines");
+  const all = [...clefs, ...otherClefs, ...barLines];
+  const keptIndices = indicesInto(
+    field(object, "kept", path),
+    all.length,
+    `${path}.kept`,
+    "clefs + otherClefs + barLines"
+  );
+  for (let i = 1; i < keptIndices.length; i += 1) {
+    if ((keptIndices[i] ?? 0) <= (keptIndices[i - 1] ?? 0)) {
+      throw new GoldenError(
+        `${path}.kept[${i}]`,
+        "filter_unusual_anchors keeps list order, so kept must ascend"
+      );
+    }
+  }
+  const zones = asArray(field(object, "zones", path), `${path}.zones`).map(
+    (v, i): GoldenClefZone => {
+      const at = `${path}.zones[${i}]`;
+      const zone = asObject(v, at);
+      const start = integerOf(field(zone, "start", at), `${at}.start`);
+      const stop = integerOf(field(zone, "stop", at), `${at}.stop`);
+      if (start < 0 || stop < start) {
+        throw new GoldenError(at, `not a column range: [${start}, ${stop})`);
+      }
+      const lines = asArray(field(zone, "lines", at), `${at}.lines`).map(
+        (group, g) => {
+          const rows = numbers(group, `${at}.lines[${g}]`);
+          if (rows.length !== LINES_PER_STAFF) {
+            throw new GoldenError(
+              `${at}.lines[${g}]`,
+              `expected ${LINES_PER_STAFF} rows, got ${rows.length}`
+            );
+          }
+          for (let r = 1; r < rows.length; r += 1) {
+            if ((rows[r] ?? 0) <= (rows[r - 1] ?? 0)) {
+              throw new GoldenError(
+                `${at}.lines[${g}]`,
+                "rows of a group must ascend"
+              );
+            }
+          }
+          return rows;
+        }
+      );
+      return { lines, start, stop };
+    }
+  );
+  if (zones.length > 0 && clefs.length === 0) {
+    throw new GoldenError(`${path}.zones`, "zones without a clef anchor");
+  }
+  return {
+    barLines,
+    clefs,
+    kept: keptIndices.map((index, i) =>
+      pick(all, index, `${path}.kept[${i}]`, "clefs + otherClefs + barLines")
+    ),
+    otherClefSymbols: decodeRotatedBoxes(
+      field(object, "otherClefSymbols", path),
+      `${path}.otherClefSymbols`
+    ),
+    otherClefs,
+    zones,
+  };
+}
+
+/**
+ * One RawStaff. The box is Python's stored rect and polygon, not a refit: the
+ * decoder has no opencv.js. Its contour is rebuilt as RawStaff.__init__ builds
+ * it, from the lines.
+ */
+function rawStaffOf(
+  json: unknown,
+  fragments: readonly RotatedBox[],
+  keptAnchors: readonly StaffAnchor[],
+  path: string
+): RawStaff {
+  const object = asObject(json, path);
+  const box = asArray(field(object, "box", path), `${path}.box`);
+  if (box.length !== 3) {
+    throw new GoldenError(
+      `${path}.box`,
+      `expected [[cx, cy], [w, h], angle], got ${box.length} parts`
+    );
+  }
+  const [cx, cy] = pair(box[0], `${path}.box[0]`);
+  const [w, h] = pair(box[1], `${path}.box[1]`);
+  let rect: RotatedRect;
+  try {
+    rect = assertNormalizedRect({
+      angle: asNumber(box[2], `${path}.box[2]`),
+      cx,
+      cy,
+      h,
+      w,
+    });
+  } catch (error) {
+    throw goldenErrorAt(`${path}.box`, error);
+  }
+  const polygon = polygonOf(field(object, "polygon", path), `${path}.polygon`);
+  if (pointCount(polygon) !== 4) {
+    throw new GoldenError(`${path}.polygon`, "expected four corners");
+  }
+  const [first, ...rest] = asArray(
+    field(object, "anchors", path),
+    `${path}.anchors`
+  ).map((v, i) =>
+    pick(keptAnchors, v, `${path}.anchors[${i}]`, "the kept anchors")
+  );
+  if (first === undefined) {
+    throw new GoldenError(`${path}.anchors`, "a raw staff with no anchor");
+  }
+  const lines = fiveLinesOf(
+    field(object, "lines", path),
+    fragments,
+    `${path}.lines`
+  );
+  return rawStaffFromParts(
+    rotatedBoxFromParts(
+      rect,
+      polygon,
+      rawStaffContour(lines),
+      integerOf(field(object, "staffId", path), `${path}.staffId`)
+    ),
+    lines,
+    [first, ...rest]
+  );
+}
+
+/** raw-staffs.json. */
+export interface GoldenRawStaffs {
+  /** find_raw_staffs_by_connecting_line_fragments, in list order. */
+  readonly connected: RawStaff[];
+  /** remove_duplicate_staffs: objects of `connected`, in output order. resample_staffs returns one Staff per entry, in this order. */
+  readonly deduplicated: RawStaff[];
+  /** Indices into `deduplicated` whose resampled staff filter_edge_of_vision dropped. */
+  readonly droppedAtEdge: readonly number[];
+  /** For staffs.json[i], the index into `deduplicated` of the raw staff it was resampled from. */
+  readonly resampledFrom: readonly number[];
+}
+
+/** Asserts that every deduplicated staff is either in staffs.json or dropped at the edge, and never both. */
+export function decodeRawStaffs(
+  json: unknown,
+  fragments: readonly RotatedBox[],
+  keptAnchors: readonly StaffAnchor[],
+  path = "$"
+): GoldenRawStaffs {
+  const object = asObject(json, path);
+  const connected = asArray(
+    field(object, "connected", path),
+    `${path}.connected`
+  ).map((v, i) =>
+    rawStaffOf(v, fragments, keptAnchors, `${path}.connected[${i}]`)
+  );
+  const deduplicatedIndices = indicesInto(
+    field(object, "deduplicated", path),
+    connected.length,
+    `${path}.deduplicated`,
+    "connected"
+  );
+  assertDistinct(deduplicatedIndices, `${path}.deduplicated`);
+  const resampledFrom = indicesInto(
+    field(object, "resampledFrom", path),
+    deduplicatedIndices.length,
+    `${path}.resampledFrom`,
+    "deduplicated"
+  );
+  const droppedAtEdge = indicesInto(
+    field(object, "droppedAtEdge", path),
+    deduplicatedIndices.length,
+    `${path}.droppedAtEdge`,
+    "deduplicated"
+  );
+  const accounted = [...resampledFrom, ...droppedAtEdge];
+  assertDistinct(accounted, `${path}.resampledFrom + droppedAtEdge`);
+  if (accounted.length !== deduplicatedIndices.length) {
+    throw new GoldenError(
+      path,
+      `${deduplicatedIndices.length} deduplicated staffs, of which ${accounted.length} are resampled or dropped`
+    );
+  }
+  return {
+    connected,
+    deduplicated: deduplicatedIndices.map((index, i) =>
+      pick(connected, index, `${path}.deduplicated[${i}]`, "connected")
+    ),
+    droppedAtEdge,
+    resampledFrom,
+  };
+}
+
+/** notehead-splits.json: one (staff, notehead) pair that split_clumps_of_noteheads cut into more than one piece. */
+export interface GoldenNoteheadSplit {
+  /** Index into noteheads-with-stems.json. */
+  readonly notehead: number;
+  /** The pieces in split order, before add_notes_to_staffs filters them by size. They share the clump's contour. */
+  readonly pieces: Ellipse[];
+  /** Index into staffs.json. */
+  readonly staff: number;
+}
+
+/** Empty on a page with no clumped noteheads, as the Kesh page is. */
+export function decodeNoteheadSplits(
+  json: unknown,
+  path = "$"
+): GoldenNoteheadSplit[] {
+  return asArray(json, path).map((v, i) => {
+    const at = `${path}[${i}]`;
+    const object = asObject(v, at);
+    const pieces = decodeEllipses(field(object, "pieces", at), `${at}.pieces`);
+    if (pieces.length < 2) {
+      throw new GoldenError(
+        `${at}.pieces`,
+        `a split has at least two pieces, got ${pieces.length}`
+      );
+    }
+    const index = (name: string): number => {
+      const n = integerOf(field(object, name, at), `${at}.${name}`);
+      if (n < 0) {
+        throw new GoldenError(`${at}.${name}`, `negative index ${n}`);
+      }
+      return n;
+    };
+    return { notehead: index("notehead"), pieces, staff: index("staff") };
+  });
+}
+
+/** One (staff, neighbour) pair of find_braces_brackets_and_grand_staff_lines with at least one connection. */
+export interface GoldenBraceConnection {
+  /** Index into staffs.json: staff - 1 or staff + 1. */
+  readonly neighbour: number;
+  /** Index into staffs.json. */
+  readonly staff: number;
+  /** _get_connections_between_staffs: indices into boxes-brace_dot.json, in result order. A box found by two of the three searches appears twice. */
+  readonly symbols: readonly number[];
+}
+
+/** braces.json. Every number is an index: into boxes-brace_dot.json, or into the staffs of staffs.json. */
+export interface GoldenBraces {
+  /** In homr's loop order: by staff, the upper neighbour before the lower. */
+  readonly connections: GoldenBraceConnection[];
+  /** Staff indices per MultiStaff after _merge_multi_staff_if_they_share_a_staff, before grand staffs. */
+  readonly merged: readonly (readonly number[])[];
+  /** How many of notes.json's notes each staff of staffs.json received, in order. */
+  readonly notesPerStaff: readonly number[];
+  /** _filter_for_tall_elements, in boxes-brace_dot.json order. */
+  readonly tall: readonly number[];
+}
+
+export function decodeBraces(json: unknown, path = "$"): GoldenBraces {
+  const object = asObject(json, path);
+  const notesPerStaff = asArray(
+    field(object, "notesPerStaff", path),
+    `${path}.notesPerStaff`
+  ).map((v, i) => {
+    const count = integerOf(v, `${path}.notesPerStaff[${i}]`);
+    if (count < 0) {
+      throw new GoldenError(`${path}.notesPerStaff[${i}]`, "negative count");
+    }
+    return count;
+  });
+  const staffCount = notesPerStaff.length;
+  const tall = asArray(field(object, "tall", path), `${path}.tall`).map(
+    (v, i) => integerOf(v, `${path}.tall[${i}]`)
+  );
+  for (let i = 0; i < tall.length; i += 1) {
+    if ((tall[i] ?? 0) < 0 || (i > 0 && (tall[i] ?? 0) <= (tall[i - 1] ?? 0))) {
+      throw new GoldenError(
+        `${path}.tall[${i}]`,
+        "tall must be ascending indices: the filter keeps list order"
+      );
+    }
+  }
+  const tallSet = new Set(tall);
+  const connections = asArray(
+    field(object, "connections", path),
+    `${path}.connections`
+  ).map((v, i): GoldenBraceConnection => {
+    const at = `${path}.connections[${i}]`;
+    const connection = asObject(v, at);
+    const [staff] = indicesInto(
+      [field(connection, "staff", at)],
+      staffCount,
+      `${at}.staff`,
+      "the staffs"
+    );
+    const [neighbour] = indicesInto(
+      [field(connection, "neighbour", at)],
+      staffCount,
+      `${at}.neighbour`,
+      "the staffs"
+    );
+    if (
+      staff === undefined ||
+      neighbour === undefined ||
+      Math.abs(staff - neighbour) !== 1
+    ) {
+      throw new GoldenError(at, "a neighbour is the staff above or below");
+    }
+    const symbols = asArray(
+      field(connection, "symbols", at),
+      `${at}.symbols`
+    ).map((s, k) => {
+      const symbol = integerOf(s, `${at}.symbols[${k}]`);
+      if (!tallSet.has(symbol)) {
+        throw new GoldenError(
+          `${at}.symbols[${k}]`,
+          `${symbol} is not one of the tall elements`
+        );
+      }
+      return symbol;
+    });
+    if (symbols.length === 0) {
+      throw new GoldenError(`${at}.symbols`, "a connection with no symbol");
+    }
+    return { neighbour, staff, symbols };
+  });
+  const merged = asArray(field(object, "merged", path), `${path}.merged`).map(
+    (v, i) => {
+      const staffs = indicesInto(
+        v,
+        staffCount,
+        `${path}.merged[${i}]`,
+        "the staffs"
+      );
+      if (staffs.length === 0) {
+        throw new GoldenError(`${path}.merged[${i}]`, "an empty multi staff");
+      }
+      assertDistinct(staffs, `${path}.merged[${i}]`);
+      return staffs;
+    }
+  );
+  const placed = new Set(merged.flat());
+  if (placed.size !== staffCount) {
+    throw new GoldenError(
+      `${path}.merged`,
+      `${placed.size} of ${staffCount} staffs are in a multi staff`
+    );
+  }
+  return { connections, merged, notesPerStaff, tall };
+}
+
+export const NOISE_OUTCOMES = ["clean", "masked", "skipped"] as const;
+
+/**
+ * What filter_predictions did: `clean` found no noisy tile, `masked` blanked
+ * the noisy tiles in every mask and in the page, `skipped` found more than
+ * half the tiles noisy and left everything alone.
+ */
+export type GoldenNoiseOutcome = (typeof NOISE_OUTCOMES)[number];
+
+/** noise.json: create_grid, apply_noise_filter and handle_filter_results on the page's staff mask. */
+export interface GoldenNoise {
+  /** Tiles above the noise limit with a neighbour above it. */
+  readonly filtered: number;
+  /** One row per tile row: the uint8 numpy stored, which wraps a noise estimate above 255. */
+  readonly grid: readonly (readonly number[])[];
+  readonly outcome: GoldenNoiseOutcome;
+  /** Tile size in pixels: the page's height and width floor-divided by 20. */
+  readonly tile: { readonly height: number; readonly width: number };
+  readonly total: number;
+}
+
+export function decodeNoise(json: unknown, path = "$"): GoldenNoise {
+  const object = asObject(json, path);
+  const [tileHeight, tileWidth] = pair(
+    field(object, "tile", path),
+    `${path}.tile`
+  );
+  if (
+    !(Number.isInteger(tileHeight) && Number.isInteger(tileWidth)) ||
+    tileHeight < 1 ||
+    tileWidth < 1
+  ) {
+    throw new GoldenError(`${path}.tile`, "expected two positive integers");
+  }
+  const grid = asArray(field(object, "grid", path), `${path}.grid`).map(
+    (row, i) =>
+      numbers(row, `${path}.grid[${i}]`).map((value, j) => {
+        if (!Number.isInteger(value) || value < 0 || value > 255) {
+          throw new GoldenError(
+            `${path}.grid[${i}][${j}]`,
+            `expected a uint8, got ${value}`
+          );
+        }
+        return value;
+      })
+  );
+  const columns = grid[0]?.length ?? 0;
+  if (columns === 0 || grid.some((row) => row.length !== columns)) {
+    throw new GoldenError(`${path}.grid`, "expected a non-empty rectangle");
+  }
+  const filtered = integerOf(
+    field(object, "filtered", path),
+    `${path}.filtered`
+  );
+  const total = integerOf(field(object, "total", path), `${path}.total`);
+  if (total !== grid.length * columns) {
+    throw new GoldenError(
+      `${path}.total`,
+      `${total} tiles counted in a ${grid.length} by ${columns} grid`
+    );
+  }
+  if (filtered < 0 || filtered > total) {
+    throw new GoldenError(`${path}.filtered`, `${filtered} of ${total} tiles`);
+  }
+  const name = asString(field(object, "outcome", path), `${path}.outcome`);
+  const outcome = NOISE_OUTCOMES.find((known) => known === name);
+  if (outcome === undefined) {
+    throw new GoldenError(`${path}.outcome`, `unknown outcome ${name}`);
+  }
+  let expected: GoldenNoiseOutcome = "masked";
+  if (filtered === 0) {
+    expected = "clean";
+  } else if (filtered / total > 0.5) {
+    expected = "skipped";
+  }
+  if (outcome !== expected) {
+    throw new GoldenError(
+      `${path}.outcome`,
+      `${outcome}, where ${filtered} of ${total} filtered tiles means ${expected}`
+    );
+  }
+  return {
+    filtered,
+    grid,
+    outcome,
+    tile: { height: tileHeight, width: tileWidth },
+    total,
+  };
 }

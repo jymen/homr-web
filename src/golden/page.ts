@@ -11,6 +11,8 @@
  */
 
 import type { Ellipse, RotatedBox } from "../geometry/boxes.js";
+import { NOISE_GRID_DIVISIONS } from "../geometry/noise-filter.js";
+import { floorDiv } from "../image/numeric.js";
 import {
   type ColorImage,
   colorImageFromRgba,
@@ -23,23 +25,33 @@ import {
   MASK_CLASSES,
   type MaskClass,
 } from "../model/pipeline.js";
-import type { MultiStaff, Staff } from "../model/staff.js";
+import { createStaff, type MultiStaff, type Staff } from "../model/staff.js";
 import type { Note, NoteheadWithStem } from "../model/symbols.js";
 import type { StaffPosition } from "../result.js";
 import type { DecodedSymbol, EncodedSymbol } from "../transformer/symbol.js";
 import {
   decodeBarLines,
+  decodeBraces,
   decodeEllipses,
   decodeMultiStaffs,
+  decodeNoise,
+  decodeNoteheadSplits,
   decodeNoteheadsWithStems,
   decodeNotes,
+  decodeRawStaffs,
   decodeRotatedBoxes,
   decodeStaff,
+  decodeStaffAnchors,
   decodeStaffPositions,
   decodeStaffs,
   decodeTokens,
   decodeVoices,
+  type GoldenBraces,
   GoldenError,
+  type GoldenNoise,
+  type GoldenNoteheadSplit,
+  type GoldenRawStaffs,
+  type GoldenStaffAnchors,
 } from "./decode.js";
 
 /**
@@ -60,11 +72,25 @@ export interface GoldenReader {
   readonly text: (name: string) => string;
 }
 
+/**
+ * What produced a dump. `machine` is recorded because np.argsort's tie order
+ * and the float-to-uint8 cast in the noise grid are the oracle machine's.
+ */
+export interface GoldenOracle {
+  /** platform.machine(), "arm64" on the machine the public fixtures were dumped on. */
+  readonly machine: string;
+  readonly numpy: string;
+  readonly opencv: string;
+  readonly python: string;
+}
+
 export interface GoldenMeta {
   readonly fixture: string;
   readonly homrVersion: string;
   readonly imageSha256: string;
   readonly models: Readonly<Record<"segnet" | "encoder" | "decoder", string>>;
+  /** Absent from a meta.json written before phase 5. */
+  readonly oracle?: GoldenOracle;
   readonly stages: readonly string[];
 }
 
@@ -87,24 +113,49 @@ export interface GoldenPage {
     readonly barLines: RotatedBox[];
   };
   readonly boxes: (kind: GoldenBoxKind) => RotatedBox[];
+  /** mask-brace_dot.png: prepare_brace_dot_image, the mask boxes-brace_dot.json was fitted to. */
+  readonly braceDotMask: () => Mask;
+  /** braces.json, checked against staffs.json, notes.json and boxes-brace_dot.json. */
+  readonly braces: () => GoldenBraces;
   readonly canvas: (index: number) => GrayImage;
   /** canvas-<n>-staff.json: the staff in canvas space. */
   readonly canvasStaff: (index: number) => Staff;
+  /** mask-denoised-staff.png: the staff mask after filter_predictions, before make_lines_stronger. */
+  readonly denoisedStaffMask: () => Mask;
   /** mask-<name>.png, or mask-filtered-<name>.png (after noise filtering and make_lines_stronger). */
   readonly mask: (name: MaskClass, filtered?: boolean) => Mask;
   readonly meta: () => GoldenMeta;
   readonly multiStaffs: () => MultiStaff[];
   readonly musicXml: () => string;
+  /** noise.json, checked against the staff mask's size. */
+  readonly noise: () => GoldenNoise;
+  /** mask-noise.png: the tiles filter_predictions kept, or null unless the outcome is `masked` (the file exists only then). */
+  readonly noiseMask: () => Mask | null;
+  readonly noteheadSplits: () => GoldenNoteheadSplit[];
   readonly noteheads: () => Ellipse[];
   readonly noteheadsWithStems: () => NoteheadWithStem[];
   readonly notes: () => Note[];
+  /** other-clefs.json: the boxes predict_other_anchors_from_clefs builds, before it drops the ones overlapping a clef anchor's symbol. */
+  readonly otherClefCandidates: () => RotatedBox[];
   readonly preprocessed: () => GrayImage;
+  /** raw-staffs.json, resolved against staffAnchors().kept and boxes("staffFragmentsBroken"). */
+  readonly rawStaffs: () => GoldenRawStaffs;
   /** resized.png: the autocropped page resized to width 1920, in BGR. */
   readonly resized: () => ColorImage;
   /** How many canvas-<n>.png files the page has: the staffs parsed, in parse order. */
+  readonly staffAnchors: () => GoldenStaffAnchors;
   readonly staffCount: () => number;
   readonly staffPositions: () => StaffPosition[];
+  /** staff-positions.txt as written, for a byte comparison; staffPositions() is the parsed form. */
+  readonly staffPositionsText: () => string;
   readonly staffs: () => Staff[];
+  /**
+   * staffs.json with notes.json dealt out by braces.json's notesPerStaff:
+   * Python's staffs as find_braces_brackets_and_grand_staff_lines received
+   * them. A new list of new staffs on every call, since that stage tells
+   * staffs apart by identity.
+   */
+  readonly staffsWithNotes: () => Staff[];
   readonly tokens: (index: number) => DecodedSymbol[];
   readonly voices: () => EncodedSymbol[][];
 }
@@ -186,14 +237,94 @@ export function createGoldenPage(reader: GoldenReader): GoldenPage {
   const staffCount = memo(
     () => meta().stages.filter((name) => CANVAS_FILE.test(name)).length
   );
+  const boxes = memoBy((kind: GoldenBoxKind) =>
+    decodeRotatedBoxes(json(GOLDEN_BOX_FILES[kind]), GOLDEN_BOX_FILES[kind])
+  );
+  const staffs = memo(() => decodeStaffs(json("staffs.json"), "staffs.json"));
+  const notes = memo(() => decodeNotes(json("notes.json"), "notes.json"));
+  const noteheadsWithStems = memo(() =>
+    decodeNoteheadsWithStems(
+      json("noteheads-with-stems.json"),
+      "noteheads-with-stems.json"
+    )
+  );
+  const staffAnchors = memo(() =>
+    decodeStaffAnchors(
+      json("staff-anchors.json"),
+      boxes("staffFragmentsBroken"),
+      "staff-anchors.json"
+    )
+  );
+  const rawStaffs = memo(() => {
+    const raw = decodeRawStaffs(
+      json("raw-staffs.json"),
+      boxes("staffFragmentsBroken"),
+      staffAnchors().kept,
+      "raw-staffs.json"
+    );
+    if (raw.resampledFrom.length !== staffs().length) {
+      throw new GoldenError(
+        "raw-staffs.json.resampledFrom",
+        `${raw.resampledFrom.length} entries for the ${staffs().length} staffs of staffs.json`
+      );
+    }
+    return raw;
+  });
+  const braces = memo(() => {
+    const decoded = decodeBraces(json("braces.json"), "braces.json");
+    if (decoded.notesPerStaff.length !== staffs().length) {
+      throw new GoldenError(
+        "braces.json.notesPerStaff",
+        `${decoded.notesPerStaff.length} counts for the ${staffs().length} staffs of staffs.json`
+      );
+    }
+    const dealt = decoded.notesPerStaff.reduce((n, count) => n + count, 0);
+    if (dealt !== notes().length) {
+      throw new GoldenError(
+        "braces.json.notesPerStaff",
+        `${dealt} notes dealt out, notes.json has ${notes().length}`
+      );
+    }
+    const braceDotCount = boxes("braceDot").length;
+    const beyond = decoded.tall.find((index) => index >= braceDotCount);
+    if (beyond !== undefined) {
+      throw new GoldenError(
+        "braces.json.tall",
+        `index ${beyond} is outside boxes-brace_dot.json (${braceDotCount} entries)`
+      );
+    }
+    return decoded;
+  });
+  const noise = memo(() => {
+    const decoded = decodeNoise(json("noise.json"), "noise.json");
+    const staff = maskOf("mask-denoised-staff.png");
+    const tile = {
+      height: floorDiv(staff.height, NOISE_GRID_DIVISIONS),
+      width: floorDiv(staff.width, NOISE_GRID_DIVISIONS),
+    };
+    const rows = Math.ceil(staff.height / tile.height);
+    const columns = Math.ceil(staff.width / tile.width);
+    if (
+      decoded.tile.height !== tile.height ||
+      decoded.tile.width !== tile.width ||
+      decoded.grid.length !== rows ||
+      decoded.grid[0]?.length !== columns
+    ) {
+      throw new GoldenError(
+        "noise.json",
+        `a ${staff.width}x${staff.height} mask has ${columns}x${rows} tiles of ${tile.width}x${tile.height}`
+      );
+    }
+    return decoded;
+  });
   return {
     autocropped: memo(() => color("autocropped.png")),
     barLines: memo(() =>
       decodeBarLines(json("barlines.json"), "barlines.json")
     ),
-    boxes: memoBy((kind: GoldenBoxKind) =>
-      decodeRotatedBoxes(json(GOLDEN_BOX_FILES[kind]), GOLDEN_BOX_FILES[kind])
-    ),
+    boxes,
+    braceDotMask: () => maskOf("mask-brace_dot.png"),
+    braces,
     canvas: memoBy((index: number) => {
       const image = gray(`canvas-${index}.png`);
       if (
@@ -214,6 +345,7 @@ export function createGoldenPage(reader: GoldenReader): GoldenPage {
         `canvas-${index}-staff.json`
       )
     ),
+    denoisedStaffMask: () => maskOf("mask-denoised-staff.png"),
     mask: (name: MaskClass, filtered = false) =>
       maskOf(
         `mask-${filtered ? "filtered-" : ""}${MASK_CLASSES[name].golden}.png`
@@ -223,23 +355,58 @@ export function createGoldenPage(reader: GoldenReader): GoldenPage {
       decodeMultiStaffs(json("multistaffs.json"), "multistaffs.json")
     ),
     musicXml: memo(() => reader.text("page.musicxml")),
+    noise,
+    noiseMask: () =>
+      noise().outcome === "masked" ? maskOf("mask-noise.png") : null,
+    noteheadSplits: memo(() => {
+      const splits = decodeNoteheadSplits(
+        json("notehead-splits.json"),
+        "notehead-splits.json"
+      );
+      for (const [i, split] of splits.entries()) {
+        if (
+          split.staff >= staffs().length ||
+          split.notehead >= noteheadsWithStems().length
+        ) {
+          throw new GoldenError(
+            `notehead-splits.json[${i}]`,
+            `staff ${split.staff} of ${staffs().length}, notehead ${split.notehead} of ${noteheadsWithStems().length}`
+          );
+        }
+      }
+      return splits;
+    }),
     noteheads: memo(() =>
       decodeEllipses(json("boxes-noteheads.json"), "boxes-noteheads.json")
     ),
-    noteheadsWithStems: memo(() =>
-      decodeNoteheadsWithStems(
-        json("noteheads-with-stems.json"),
-        "noteheads-with-stems.json"
-      )
+    noteheadsWithStems,
+    notes,
+    otherClefCandidates: memo(() =>
+      decodeRotatedBoxes(json("other-clefs.json"), "other-clefs.json")
     ),
-    notes: memo(() => decodeNotes(json("notes.json"), "notes.json")),
     preprocessed: memo(() => gray("preprocessed.png")),
+    rawStaffs,
     resized: memo(() => color("resized.png")),
+    staffAnchors,
     staffCount,
     staffPositions: memo(() =>
       decodeStaffPositions(reader.text("staff-positions.txt"))
     ),
-    staffs: memo(() => decodeStaffs(json("staffs.json"), "staffs.json")),
+    staffPositionsText: memo(() => reader.text("staff-positions.txt")),
+    staffs,
+    staffsWithNotes: () => {
+      let next = 0;
+      return staffs().map((staff, i) => {
+        const count = braces().notesPerStaff[i] ?? 0;
+        const symbols = notes().slice(next, next + count);
+        next += count;
+        return createStaff(staff.grid, {
+          isGrandstaff: staff.isGrandstaff,
+          space: staff.space,
+          symbols,
+        });
+      });
+    },
     tokens: memoBy((index: number) =>
       decodeTokens(json(`tokens-${index}.json`), `tokens-${index}.json`)
     ),
