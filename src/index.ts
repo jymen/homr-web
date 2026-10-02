@@ -8,6 +8,7 @@ export const HOMR_VERSION = "0.7.0" as const;
 export const HOMR_COMMIT = "8b5dcf7d7bdd1a47911dc0c661c573b957271eab" as const;
 
 export * from "./cv/box-fitting.js";
+export * from "./cv/box-ops.js";
 export * from "./cv/box-overlap.js";
 export * from "./cv/box-transforms.js";
 export * from "./cv/create-boxes.js";
@@ -16,6 +17,7 @@ export * from "./cv/mat-plane.js";
 export * from "./cv/mat-points.js";
 export * from "./cv/opencv.js";
 export * from "./geometry/box-merge.js";
+export * from "./geometry/box-ops.js";
 export * from "./geometry/box-transforms.js";
 export * from "./geometry/boxes.js";
 export * from "./golden/box-tolerance.js";
