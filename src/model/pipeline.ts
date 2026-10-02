@@ -123,11 +123,67 @@ export interface PredictedSymbols {
   readonly stemsRest: readonly RotatedBox[];
 }
 
-/** Phase 5's output: the detect_staffs_in_image return without the title future and the debug object. */
+/**
+ * What noise_filtering.filter_predictions decided. Three outcomes, where
+ * Python returns a mask or None and only logs the difference: a clean page, a
+ * page so noisy that masking would remove more than half of it and is
+ * skipped, and a page with some tiles masked out.
+ */
+export type NoiseOutcome =
+  | { readonly kind: "clean"; readonly totalTiles: number }
+  | {
+      readonly filteredTiles: number;
+      readonly kind: "skipped";
+      readonly totalTiles: number;
+    }
+  | {
+      readonly filteredTiles: number;
+      /** 1 on the tiles kept. Every plane of the page was multiplied by it. */
+      readonly keep: Mask;
+      readonly kind: "masked";
+      readonly totalTiles: number;
+    };
+
+/**
+ * Why a page yields no PageDetection. The first two are homr's own
+ * exceptions with homr's messages, and are what a page that is not music
+ * produces. The last two are where homr 0.7.0 crashes with an IndexError; the
+ * port fails at the same place with a name.
+ */
+export const DETECTION_FAILURES = {
+  "no-noteheads": "No noteheads found",
+  "no-staffs": "No staffs found",
+  "staff-without-points": "A staff has no position with all five lines",
+  "zone-without-lines": "No staff line found in the column under a clef",
+} as const;
+
+export type DetectionFailure = keyof typeof DETECTION_FAILURES;
+
+/**
+ * The one error detection throws for a page it cannot read, whichever module
+ * notices. Any other error out of detection is a defect, not an outcome.
+ */
+export class DetectionError extends Error {
+  readonly code: DetectionFailure;
+
+  constructor(code: DetectionFailure) {
+    super(DETECTION_FAILURES[code]);
+    this.name = "DetectionError";
+    this.code = code;
+  }
+}
+
+/** The detect_staffs_in_image return without the title future and the debug object. */
 export interface PageDetection {
   readonly multiStaffs: readonly MultiStaff[];
-  /** Every note found, also present in its staff's `symbols`; kept flat because the bench overlay and the xml writer read it that way. */
+  readonly noise: NoiseOutcome;
+  /** Every note found, in add_notes_to_staffs order (staff, then notehead); each is also in its staff's `symbols`. */
   readonly notes: readonly Note[];
+  /**
+   * The gray page after the noise mask, when `noise.kind` is "masked": homr
+   * returns the masked image and the staff canvases are cut out of it. The
+   * unmasked page is the caller's own InputPredictions.
+   */
   readonly preprocessed: GrayImage;
 }
 

@@ -1,8 +1,7 @@
 /**
- * Port of the staff half of homr's model.py: StaffPoint, Staff, MultiStaff.
- * Fields only; the methods (get_at, is_on_staff_zone, merge,
- * transform_coordinates, extend_to_x_range, find_position_in_unit_sizes)
- * arrive in phase 5 as free functions in this file.
+ * Port of the staff half of homr's model.py: StaffPoint, Staff, MultiStaff,
+ * with their methods as free functions. transform_coordinates and
+ * extend_to_x_range belong to the dewarp and are not here yet.
  *
  * homr computes several fields in constructors from other fields
  * (Staff.min_x from the grid, average_unit_size as a median). They are
@@ -20,9 +19,29 @@
  * refuse the wrong one.
  */
 
-import type { RotatedBox } from "../geometry/boxes.js";
-import { mean, median } from "../image/numeric.js";
-import { LINES_PER_STAFF, MAX_LEDGER_LINES } from "./constants.js";
+import {
+  type AnyBox,
+  type AxisBox,
+  centerOf,
+  createAxisBox,
+  type Point,
+  pointListFromPairs,
+  type RotatedBox,
+  sameRect,
+} from "../geometry/boxes.js";
+import {
+  argmin,
+  mean,
+  median,
+  roundHalfEven,
+  truncToInt,
+} from "../image/numeric.js";
+import {
+  LINES_PER_STAFF,
+  MAX_LEDGER_LINES,
+  STAFF_POSITION_TOLERANCE,
+} from "./constants.js";
+import { DetectionError } from "./pipeline.js";
 import type { SymbolOnStaff } from "./symbols.js";
 
 /** A staff or multi-staff that cannot exist. Named for what it is about, as PlaneError, GoldenError and VocabularyError are; phase 2's src/models/ owns the separate ModelError. */
@@ -119,23 +138,24 @@ export interface Staff {
   readonly minY: number;
   readonly space: CoordinateSpace;
   /**
-   * Detection order; add_symbol appends. The one mutable field on a staff:
-   * notes are attached after the staff exists and homr never rebuilds the
-   * staff to do it. Empty in staffs.json, filled in multistaffs.json.
+   * Detection order. Empty in staffs.json, filled in multistaffs.json. homr
+   * appends to this list in place (add_symbol); the port builds a second
+   * staff with withSymbols, so no field of a Staff is ever written twice.
    */
-  readonly symbols: SymbolOnStaff[];
+  readonly symbols: readonly SymbolOnStaff[];
 }
 
 export interface StaffOptions {
   readonly isGrandstaff?: boolean;
   readonly space?: CoordinateSpace;
-  readonly symbols?: SymbolOnStaff[];
+  readonly symbols?: readonly SymbolOnStaff[];
 }
 
 /**
- * Staff(grid), plus the fields homr sets after construction. Throws on an
- * empty grid. `symbols` is adopted, not copied: the caller hands over the
- * array and the staff owns it from then on. Defaults to page space.
+ * Staff(grid), plus the fields homr sets after construction. Throws a
+ * StaffError on an empty grid, so a caller standing where Python's
+ * Staff([]) raises IndexError checks first and throws its DetectionError.
+ * Defaults to page space.
  */
 export function createStaff(
   grid: readonly StaffPoint[],
@@ -195,4 +215,183 @@ export function createMultiStaff(
     throw new StaffError("a multi staff needs at least one staff");
   }
   return { connections, staffs: [first, ...rest] };
+}
+
+/**
+ * Staff.get_at: the grid point nearest `x`, or null when even that one is
+ * more than STAFF_POSITION_TOLERANCE away.
+ *
+ * The first minimum in grid order wins, and the grid is neither sorted nor
+ * free of duplicate x values, so this is a scan with a strict `<` and must
+ * never become a binary search.
+ */
+export function staffPointAt(staff: Staff, x: number): StaffPoint | null {
+  let [closest] = staff.grid;
+  let distance = Math.abs(closest.x - x);
+  for (const point of staff.grid) {
+    const candidate = Math.abs(point.x - x);
+    if (candidate < distance) {
+      closest = point;
+      distance = candidate;
+    }
+  }
+  return distance > STAFF_POSITION_TOLERANCE ? null : closest;
+}
+
+/** What Staff.y_distance_to answers where the staff has no point near x: "something large to mimic infinity". */
+const NO_STAFF_AT_X = 1e10;
+
+/** Staff.y_distance_to: the distance from `point` to the nearest line of the staff at its x. */
+export function yDistanceTo(staff: Staff, point: Point): number {
+  const staffPoint = staffPointAt(staff, point.x);
+  if (staffPoint === null) {
+    return NO_STAFF_AT_X;
+  }
+  return Math.min(...staffPoint.y.map((y) => Math.abs(y - point.y)));
+}
+
+/** Staff.is_on_staff_zone: within the ledger-line tolerance of the outer lines, both ends inclusive. */
+export function isOnStaffZone(staff: Staff, item: AnyBox): boolean {
+  const center = centerOf(item);
+  const point = staffPointAt(staff, center.x);
+  if (point === null) {
+    return false;
+  }
+  const tolerance = yTolerance(staff);
+  return !(
+    center.y > lastLineY(point) + tolerance || center.y < point.y[0] - tolerance
+  );
+}
+
+/**
+ * StaffPoint.find_position_in_unit_sizes:
+ * `2 * (len(y) - idx) + round(2 * distance / unit) - 1`, from the first
+ * nearest line and with Python's round, so a centre midway between a line
+ * and a space goes to the even side.
+ */
+export function findPositionInUnitSizes(
+  point: StaffPoint,
+  box: AnyBox
+): number {
+  const centerY = centerOf(box).y;
+  const nearest = argmin(point.y.map((y) => Math.abs(y - centerY)));
+  const distance = (point.y[nearest] ?? Number.NaN) - centerY;
+  return (
+    2 * (point.y.length - nearest) +
+    roundHalfEven((2 * distance) / point.averageUnitSize) -
+    1
+  );
+}
+
+/** The debug id homr gives the box of a staff point. */
+const STAFF_POINT_BOX_DEBUG_ID = -2;
+
+/**
+ * StaffPoint.to_bounding_box: a zero-width box at `int(x)` from `int(y[0])`
+ * to `int(y[-1])`, with an empty contour.
+ */
+export function staffPointToAxisBox(point: StaffPoint): AxisBox {
+  const x = truncToInt(point.x);
+  return createAxisBox(
+    x,
+    truncToInt(point.y[0]),
+    x,
+    truncToInt(lastLineY(point)),
+    pointListFromPairs([]),
+    STAFF_POINT_BOX_DEBUG_ID
+  );
+}
+
+/** How far apart in x StaffPoint.merge lets two points be. */
+const MERGE_X_TOLERANCE = 1e-3;
+
+/**
+ * StaffPoint.merge: the lines of both at the first point's x, sorted, and the
+ * mean of the two angles. Throws a StaffError where Python raises ValueError.
+ */
+export function mergeStaffPoints(a: StaffPoint, b: StaffPoint): StaffPoint {
+  if (Math.abs(a.x - b.x) > MERGE_X_TOLERANCE) {
+    throw new StaffError(
+      `cannot merge staff points at different positions: x ${a.x} and ${b.x}`
+    );
+  }
+  return createStaffPoint(
+    a.x,
+    [...a.y, ...b.y].sort((first, second) => first - second),
+    (a.angle + b.angle) / 2
+  );
+}
+
+/** `{int(round(p.x)): p for p in grid}`: a later point at the same key replaces the earlier one. */
+function pointsByRoundedX(staff: Staff): Map<number, StaffPoint> {
+  const points = new Map<number, StaffPoint>();
+  for (const point of staff.grid) {
+    points.set(truncToInt(roundHalfEven(point.x)), point);
+  }
+  return points;
+}
+
+/**
+ * Staff.merge: the grand staff of two staffs, over the x positions both
+ * have, ascending, with the symbols of `self` before those of `other`.
+ *
+ * Throws DetectionError `staff-without-points` when the two share no x,
+ * where Python's Staff([]) raises IndexError.
+ */
+export function mergeStaffs(self: Staff, other: Staff): Staff {
+  const others = pointsByRoundedX(other);
+  const shared: [number, StaffPoint, StaffPoint][] = [];
+  for (const [key, point] of pointsByRoundedX(self)) {
+    const match = others.get(key);
+    if (match !== undefined) {
+      shared.push([key, point, match]);
+    }
+  }
+  if (shared.length === 0) {
+    throw new DetectionError("staff-without-points");
+  }
+  shared.sort(([first], [second]) => first - second);
+  return createStaff(
+    shared.map(([, point, match]) => mergeStaffPoints(point, match)),
+    {
+      isGrandstaff: true,
+      space: self.space,
+      symbols: [...self.symbols, ...other.symbols],
+    }
+  );
+}
+
+/**
+ * The same staff carrying `symbols`, in place of homr's add_symbol. Not
+ * createStaff: nothing derived changes.
+ */
+export function withSymbols(
+  staff: Staff,
+  symbols: readonly SymbolOnStaff[]
+): Staff {
+  return { ...staff, symbols };
+}
+
+/**
+ * MultiStaff.merge: staffs deduplicated by identity (Staff has no __eq__),
+ * connections by the value of their rect, first seen first, then the staffs
+ * sorted by minY.
+ */
+export function mergeMultiStaffs(
+  self: MultiStaff,
+  other: MultiStaff
+): MultiStaff {
+  const staffs: Staff[] = [];
+  for (const staff of [...self.staffs, ...other.staffs]) {
+    if (!staffs.includes(staff)) {
+      staffs.push(staff);
+    }
+  }
+  const connections: RotatedBox[] = [];
+  for (const connection of [...self.connections, ...other.connections]) {
+    if (!connections.some((kept) => sameRect(kept.rect, connection.rect))) {
+      connections.push(connection);
+    }
+  }
+  return createMultiStaff(staffs, connections);
 }
