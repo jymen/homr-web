@@ -49,6 +49,7 @@ export * from "./models/errors.js";
 export * from "./models/manifest.js";
 export * from "./models/session.js";
 export * from "./models/store.js";
+export * from "./pipeline/detect.js";
 export * from "./pipeline/detect-staff.js";
 export * from "./pipeline/predict-symbols.js";
 export * from "./pipeline/staff-positions.js";

@@ -7,13 +7,23 @@ and no server is involved: the segmentation and transformer models run on
 the musician's own machine through onnxruntime-web, on WebGPU where the
 browser has it and on WebAssembly elsewhere.
 
-**Status: phase 3, the library half.** The first real algorithm is ported and
-it reproduces homr exactly. A page goes through autocrop, PIL's bicubic resize
-and CLAHE to byte-identical output, is tiled the way homr tiles it, and comes
-back out of the segmentation model as the five masks, which agree with homr's
-own **pixel for pixel** on the test page rather than merely within the
-tolerance the plan allows. It runs in a Worker, on onnxruntime-web, with no
-server.
+**Status: phase 5, detection.** A page goes from pixels to homr's staffs. It
+passes through autocrop, PIL's bicubic resize and CLAHE to byte-identical
+output, is tiled the way homr tiles it, and comes back out of the segmentation
+model as the five masks, which agree with homr's own pixel for pixel on the
+test page. From the masks the port fits homr's boxes, finds the staff lines,
+pairs noteheads with stems, puts the notes on their staffs and joins braced
+staffs into grand staffs. `detectStaffsInImage` reproduces homr's
+`multistaffs.json` and `notes.json` on both public pages, a single-staff tune
+and a piano page of four braced systems, and `formatStaffPositions` writes
+homr's staff-positions file byte for byte.
+
+Two differences from homr are known and pinned by tests rather than hidden.
+opencv.js fits another rectangle than opencv-python to two noteheads of the
+piano page, because the native arm64 build uses a fused multiply-add that
+WebAssembly does not have (`docs/design/phase-5-minarearect.md`). And
+noteheads whose centres are one float32 step apart in height can come out in
+another order. The notes found, their positions and the staffs are the same.
 
 Underneath that: phase 1's data model (planes, rotated boxes with homr's angle
 normalisation, staffs and symbols, the six decoder vocabularies, and the
@@ -22,13 +32,13 @@ value Python stored), and phase 2's model layer (a generated manifest of the
 eight artifacts with their hashes, the runtime probe that picks WebGPU or
 WebAssembly, the verifying store and cache, and the sessions).
 
-Not yet done in phase 3: the bench page, the browser, and the WebGPU timings
-the plan's go/no-go gate needs. Nothing after segmentation is ported at all, so
-there is no MusicXML yet.
+`npm run bench` serves a page that runs the chain in the browser and draws the
+staffs it found over the page. Nothing after detection is ported: no dewarp,
+no transformer, so there is no MusicXML yet.
 
-The design records are `docs/design/phase-1-types.md`,
-`phase-2-models.md` and `phase-3-segnet.md`; the phase plan is in the
-AbcMusicStudio repository under `docs/homr-web-plan/`.
+The design records are under `docs/design/`, one or two files per phase, and
+`docs/decisions.tsv` holds every decision with its evidence. The phase plan is
+in the AbcMusicStudio repository under `docs/homr-web-plan/`.
 
 ## What this reproduces
 
@@ -64,7 +74,7 @@ src/transformer/  vocabulary.ts (generated tables), symbol.ts (EncodedSymbol)
 src/golden/       decode.ts (Python dump to domain types, with derivation checks), page.ts (one fixture behind one object)
 src/result.ts     what recognizePage will answer with
 test/             one test file per module, golden.test.ts over every fixture
-tools/            venv.sh, dump-golden.py, gen-vocabulary.mjs, gen-manifest.mjs, fetch-models.sh
+tools/            venv.sh, dump-golden.py, dump-vectors.py, gen-vocabulary.mjs, gen-manifest.mjs, fetch-models.sh
 ```
 
 ## How the port is tested
@@ -75,10 +85,13 @@ Every stage of homr's pipeline is a function from arrays to arrays.
 `test/golden/<fixture>/`. Each TypeScript stage is tested against the
 Python output of the stage before it, never against the TypeScript output,
 so a tolerance accepted in one stage cannot hide a defect in the next.
+`tools/dump-vectors.py` runs small hand-built inputs through the same Python
+and writes them to `test/golden/vectors/`, for the branches no page reaches.
 
 ```bash
 PYTHON=python3.12 ./tools/venv.sh   # once: homr 0.7.0 in .venv, fp32 models
 npm run golden                       # regenerate test/golden from test/fixtures
+npm run vectors                      # regenerate test/golden/vectors
 node tools/gen-vocabulary.mjs        # then refresh the token tables in src/transformer/vocabulary.ts
 npm ci && npm run check && npm run lint && npm test
 ```

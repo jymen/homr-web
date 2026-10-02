@@ -192,6 +192,31 @@ export function colorImageFromRgba(
   return image;
 }
 
+/**
+ * Browser boundary, the other way: a page as the RGBA bytes of an ImageData,
+ * opaque. Gray is repeated on the three channels, BGR is reordered, and a 0/1
+ * mask becomes black and white.
+ */
+export function rgbaFromPlane(
+  plane: GrayImage | Mask | ColorImage
+): Uint8ClampedArray {
+  const pixels = plane.width * plane.height;
+  const rgba = new Uint8ClampedArray(pixels * 4).fill(255);
+  const { data } = plane;
+  for (let i = 0; i < pixels; i += 1) {
+    if (plane.kind === "bgr") {
+      rgba[i * 4] = data[i * 3 + 2] ?? 0;
+      rgba[i * 4 + 1] = data[i * 3 + 1] ?? 0;
+      rgba[i * 4 + 2] = data[i * 3] ?? 0;
+    } else {
+      const level =
+        plane.kind === "mask" ? (data[i] ?? 0) * 255 : (data[i] ?? 0);
+      rgba.fill(level, i * 4, i * 4 + 3);
+    }
+  }
+  return rgba;
+}
+
 // The numpy usage homr actually has on 2-D arrays. Each helper names the
 // numpy or cv2 expression it stands in for; a reader of the Python can find
 // the port line by line. Coordinates are (x, y) with y down, as in cv2.

@@ -1,5 +1,7 @@
 /**
- * Phase 3's go/no-go numbers, taken in the browser they have to be decided in.
+ * Phase 3's go/no-go numbers, taken in the browser they have to be decided in,
+ * and the detection stage's runtime check: the staffs it finds, drawn over the
+ * page they were found on.
  *
  * The design doc's measurement section says this machine cannot be trusted with
  * a stopwatch under Node: the same page's tiles came out at 525, 1380, 1582 and
@@ -12,9 +14,11 @@
  * A number that is not on a record is a number nobody can trace back to the run
  * that produced it.
  *
- * The chain stops at segmentPage. predictSymbols wants noise-filtered masks,
- * which is phase 5 and not ported, and feeding it golden PNGs would measure a
- * pipeline this library does not have.
+ * The chain runs from the fixture PNG through preprocessPage and segmentPage to
+ * detectStaffsInImage, on this library's own masks and never on golden PNGs,
+ * so what the overlay shows is what a musician's page would get. Every staff
+ * line drawn comes from `staff.grid`: if the lines sit on the printed ones,
+ * the whole chain agrees with the page.
  *
  * This is also the first exercise of the default opencv.js path: the Node tests
  * inject a createRequire source because the dynamic import hangs under vitest,
@@ -31,36 +35,55 @@ import {
   BACKENDS,
   browserCache,
   colorImageFromRgba,
+  createInputPredictions,
+  DetectionError,
+  detectStaffsInImage,
   loadOpenCv,
   MASK_CLASS_NAMES,
   ModelError,
   ModelStore,
   planeAgreement,
   preprocessPage,
+  rgbaFromPlane,
   segmentPage,
   startRuntime,
 } from "../dist/index.js";
 
 const BATCHES = [8, 16, 32];
 const DEFAULT_BACKEND = "webgpu";
-const FIXTURE_URL = "/test/fixtures/the-kesh-300dpi.png";
+const DEFAULT_FIXTURE = "the-kesh-300dpi";
 const MODELS_BASE_URL = "/models/";
 
 /**
- * sha256 over the decoded ColorImage, measured on the Node golden path. Getting
- * BGR the wrong way round, or letting the canvas convert colour space, produces
- * a segmentation that is wrong and still looks like a segmentation, and no
- * other signal in a run would report it.
+ * Each public fixture with the sha256 of its decoded ColorImage, measured on
+ * the Node golden path. Getting BGR the wrong way round, or letting the canvas
+ * convert colour space, produces a segmentation that is wrong and still looks
+ * like a segmentation, and no other signal in a run would report it.
  */
-const FIXTURE_DIGEST =
-  "0c14d207bd8ea5c49b76bc1dd8f3da69618ad6c767c8e9b5733df136f084d5d0";
+const FIXTURE_DIGESTS = {
+  "grand-staff-300dpi":
+    "1cbd050f2d38e700954680c9a37d8156d58e399e5a983e4266c3e50bb51bf8e3",
+  "the-kesh-300dpi":
+    "0c14d207bd8ea5c49b76bc1dd8f3da69618ad6c767c8e9b5733df136f084d5d0",
+};
+
+/** What the overlay draws in, chosen to stay apart from black print on a gray page. */
+const OVERLAY = {
+  connection: "#ffb000",
+  grandStaff: "#e0218a",
+  line: "#00a2ff",
+  multiStaff: "#19c37d",
+};
 
 const ui = {
   backend: document.querySelectorAll('input[name="backend"]'),
+  detection: document.querySelector("#detection"),
   empty: document.querySelector("#empty"),
+  fixture: document.querySelectorAll('input[name="fixture"]'),
   head: document.querySelector("thead tr"),
   isolation: document.querySelector("#isolation"),
   log: document.querySelector("#log"),
+  overlay: document.querySelector("#overlay"),
   progress: document.querySelector("#progress"),
   run: document.querySelector("#run"),
   runs: document.querySelector("#runs"),
@@ -86,6 +109,18 @@ function requestedBackend() {
   return BACKENDS.includes(asked) ? asked : DEFAULT_BACKEND;
 }
 
+function requestedFixture() {
+  const asked = new URLSearchParams(window.location.search).get("fixture");
+  return Object.hasOwn(FIXTURE_DIGESTS, asked) ? asked : DEFAULT_FIXTURE;
+}
+
+/** Both choosers reload the page with the other's choice kept. */
+function reloadWith(name, value) {
+  const query = new URLSearchParams(window.location.search);
+  query.set(name, value);
+  window.location.search = `?${query}`;
+}
+
 function showIsolation() {
   const isolated = globalThis.crossOriginIsolated === true;
   ui.isolation.className = isolated ? "ok" : "bad";
@@ -99,10 +134,20 @@ function wireBackendChooser() {
   for (const input of ui.backend) {
     input.checked = input.value === selected;
     input.addEventListener("change", () => {
-      window.location.search = `?backend=${input.value}`;
+      reloadWith("backend", input.value);
     });
   }
   return selected;
+}
+
+function wireFixtureChooser() {
+  const selected = requestedFixture();
+  for (const input of ui.fixture) {
+    input.checked = input.value === selected;
+    input.addEventListener("change", () => {
+      reloadWith("fixture", input.value);
+    });
+  }
 }
 
 /**
@@ -164,9 +209,10 @@ async function sha256Of(data) {
 }
 
 async function decodeFixture() {
-  const response = await fetch(FIXTURE_URL);
+  const url = `/test/fixtures/${requestedFixture()}.png`;
+  const response = await fetch(url);
   if (!response.ok) {
-    throw new Error(`${FIXTURE_URL} answered ${response.status}`);
+    throw new Error(`${url} answered ${response.status}`);
   }
   const bitmap = await createImageBitmap(await response.blob(), {
     colorSpaceConversion: "none",
@@ -201,13 +247,15 @@ async function ensureImage() {
   log(
     `fixture ${decoded.width}x${decoded.height} decoded in ${ms(performance.now() - startedAt)}`
   );
-  if (digest === FIXTURE_DIGEST) {
+  const expected = FIXTURE_DIGESTS[requestedFixture()];
+  log(`fixture ${requestedFixture()}`);
+  if (digest === expected) {
     log(`decode confirmed against the golden path: ${digest}`);
   } else {
     log(
       "DECODE MISMATCH. These pixels are not the ones the golden path sees, so every number below is untrustworthy."
     );
-    log(`  expected ${FIXTURE_DIGEST}`);
+    log(`  expected ${expected}`);
     log(`  actual   ${digest}`);
   }
   image = decoded;
@@ -225,7 +273,28 @@ async function ensureRuntime() {
   return runtime;
 }
 
-async function measure(batch) {
+/**
+ * The detection stage on this run's own masks. A page homr cannot read is an
+ * outcome and is returned as one; anything else thrown is a defect and
+ * propagates.
+ */
+function detect(cv, page, result) {
+  const startedAt = performance.now();
+  try {
+    const detection = detectStaffsInImage(
+      cv,
+      createInputPredictions(page.resized, page.preprocessed, result.masks)
+    );
+    return { detection, detectMs: performance.now() - startedAt };
+  } catch (error) {
+    if (error instanceof DetectionError) {
+      return { detectMs: performance.now() - startedAt, failure: error };
+    }
+    throw error;
+  }
+}
+
+async function measure(batch, cv) {
   const events = [];
   const store = new ModelStore({
     baseUrl: MODELS_BASE_URL,
@@ -239,18 +308,20 @@ async function measure(batch) {
     // freeDimensionOverrides pins the dimension on the session.
     const session = await store.open("segnet", { batch });
     const openedAt = performance.now();
-    const { preprocessed } = await preprocessPage(image);
+    const page = await preprocessPage(image);
     const preprocessedAt = performance.now();
-    const result = await segmentPage(session, preprocessed, {
+    const result = await segmentPage(session, page.preprocessed, {
       batch,
       onProgress: (done, total) => {
         ui.progress.textContent = `batch ${batch}: tile ${done} of ${total}`;
       },
     });
     const finishedAt = performance.now();
+    const detected = detect(cv, page, result);
     const plan = store.plan("segnet");
     const bytes = byteCounts(events);
     return {
+      detected,
       result,
       run: {
         backend: runtime.backend,
@@ -258,6 +329,7 @@ async function measure(batch) {
         cachedBytes: bytes.cached,
         cacheState: bytes.downloaded === 0 ? "warm" : "cold",
         crossOriginIsolated: runtime.probe.crossOriginIsolated,
+        detectMs: detected.detectMs,
         downloadedBytes: bytes.downloaded,
         events,
         modelOpenMs: openedAt - startedAt,
@@ -299,6 +371,7 @@ function renderRuns() {
     cell(row, ms(run.preprocessMs));
     cell(row, ms(run.segmentMs));
     cell(row, ms(run.totalMs));
+    cell(row, ms(run.detectMs));
     cell(row, count(run.downloadedBytes));
     cell(row, count(run.cachedBytes));
     cell(row, kindsOf(run.events));
@@ -324,6 +397,87 @@ function logMasks(result) {
   log(`  masks: ${parts.join(", ")}`);
 }
 
+function strokePath(context, color, width, points) {
+  context.strokeStyle = color;
+  context.lineWidth = width;
+  context.beginPath();
+  for (const [i, [x, y]] of points.entries()) {
+    if (i === 0) {
+      context.moveTo(x, y);
+    } else {
+      context.lineTo(x, y);
+    }
+  }
+  context.stroke();
+}
+
+/** A square bracket left of the staffs, `inset` px from their left edge, from the top line of the first to the bottom line of the last. */
+function drawBracket(context, color, staffs, inset) {
+  const x = Math.min(...staffs.map((staff) => staff.minX)) - inset;
+  const top = Math.min(...staffs.map((staff) => staff.minY));
+  const bottom = Math.max(...staffs.map((staff) => staff.maxY));
+  strokePath(context, color, 5, [
+    [x + 14, top],
+    [x, top],
+    [x, bottom],
+    [x + 14, bottom],
+  ]);
+}
+
+/**
+ * One polyline per staff line through the grid points, a bracket per multi
+ * staff, a second one per grand staff, and the outline of every connection.
+ * The grid is drawn in x order, which it is not stored in.
+ */
+function drawDetection(detection) {
+  const { height, width } = detection.preprocessed;
+  ui.overlay.width = width;
+  ui.overlay.height = height;
+  const context = ui.overlay.getContext("2d");
+  context.putImageData(
+    new ImageData(rgbaFromPlane(detection.preprocessed), width, height),
+    0,
+    0
+  );
+  for (const multiStaff of detection.multiStaffs) {
+    for (const staff of multiStaff.staffs) {
+      const grid = [...staff.grid].sort((a, b) => a.x - b.x);
+      for (let line = 0; line < grid[0].y.length; line += 1) {
+        strokePath(
+          context,
+          OVERLAY.line,
+          2,
+          grid.map((point) => [point.x, point.y[line]])
+        );
+      }
+      if (staff.isGrandstaff) {
+        drawBracket(context, OVERLAY.grandStaff, [staff], 70);
+      }
+    }
+    drawBracket(context, OVERLAY.multiStaff, multiStaff.staffs, 90);
+    for (const connection of multiStaff.connections) {
+      const corners = [];
+      for (let i = 0; i < connection.polygon.length; i += 2) {
+        corners.push([connection.polygon[i], connection.polygon[i + 1]]);
+      }
+      strokePath(context, OVERLAY.connection, 3, [...corners, corners[0]]);
+    }
+  }
+}
+
+function showDetection(detected) {
+  if (detected.failure !== undefined) {
+    ui.detection.textContent = `no detection: ${detected.failure.code}, "${detected.failure.message}"`;
+    return;
+  }
+  const { detection } = detected;
+  const staffs = detection.multiStaffs.flatMap((multi) => multi.staffs);
+  const summary = `${detection.multiStaffs.length} multi staffs holding ${staffs.length} staffs, ${staffs.filter((staff) => staff.isGrandstaff).length} of them grand staffs, ${detection.multiStaffs.reduce((n, multi) => n + multi.connections.length, 0)} connections, ${detection.notes.length} notes, noise ${detection.noise.kind}`;
+  ui.detection.textContent = summary;
+  log(`  detection: ${summary}`);
+  drawDetection(detection);
+}
+
 function logAgreement(batch, classes) {
   if (reference === undefined) {
     reference = { batch, classes };
@@ -347,22 +501,23 @@ async function runAll() {
     // and the batch A/B would read as a preprocess difference. preprocessPage
     // still gets no cv argument: this is the same default path, warmed.
     const openCvAt = performance.now();
-    await loadOpenCv();
+    const cv = await loadOpenCv();
     log(`opencv.js ready in ${ms(performance.now() - openCvAt)}`);
 
     for (const batch of BATCHES) {
       log(`batch ${batch}: running`);
-      const { result, run } = await measure(batch);
+      const { detected, result, run } = await measure(batch, cv);
       runs.push(run);
       renderRuns();
       log(
-        `  ${run.cacheState}, open ${ms(run.modelOpenMs)}, preprocess ${ms(run.preprocessMs)}, segment ${ms(run.segmentMs)}, total ${ms(run.totalMs)}`
+        `  ${run.cacheState}, open ${ms(run.modelOpenMs)}, preprocess ${ms(run.preprocessMs)}, segment ${ms(run.segmentMs)}, detect ${ms(run.detectMs)}, total ${ms(run.totalMs)}`
       );
       log(
         `  downloaded ${count(run.downloadedBytes)} bytes, cached ${count(run.cachedBytes)} bytes, verified in ${ms(verifyMs(run.events))}, events ${kindsOf(run.events)}`
       );
       logMasks(result);
       logAgreement(batch, result.classes);
+      showDetection(detected);
     }
     log("done");
   } catch (error) {
@@ -379,6 +534,7 @@ async function runAll() {
 
 showIsolation();
 wireBackendChooser();
+wireFixtureChooser();
 renderRuns();
 ui.run.addEventListener("click", () => {
   runAll().catch((error) => {

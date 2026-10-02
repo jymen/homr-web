@@ -17,6 +17,7 @@ import {
   PlaneError,
   planeAgreement,
   planeFromBytes,
+  rgbaFromPlane,
   rowNonzeroCounts,
   sampleIndex,
 } from "../src/image/plane.js";
@@ -51,6 +52,22 @@ describe("factories and wrapping", () => {
     );
     expect(Array.from(img.data)).toEqual([30, 20, 10]);
     expect(sampleIndex(img, 0, 0, 2)).toBe(2);
+  });
+  it("converts a BGR page back to the RGBA it came from, opaque", () => {
+    const rgba = Uint8ClampedArray.from([10, 20, 30, 255, 1, 2, 3, 255]);
+    expect(rgbaFromPlane(colorImageFromRgba(2, 1, rgba))).toEqual(rgba);
+  });
+  it("shows a gray page as gray and a 0/1 mask as black and white", () => {
+    const gray = createGray(2, 1);
+    gray.data.set([7, 200]);
+    expect(Array.from(rgbaFromPlane(gray))).toEqual([
+      7, 7, 7, 255, 200, 200, 200, 255,
+    ]);
+    const mask = createMask(2, 1);
+    mask.data.set([0, 1]);
+    expect(Array.from(rgbaFromPlane(mask))).toEqual([
+      0, 0, 0, 255, 255, 255, 255, 255,
+    ]);
   });
 });
 

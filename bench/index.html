@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta content="width=device-width, initial-scale=1" name="viewport">
-    <title>homr-web segnet bench</title>
+    <title>homr-web bench</title>
     <style>
     :root {
       --ink: #d8dee9;
@@ -127,6 +127,16 @@
     #empty {
       color: var(--dim);
     }
+    #overlay {
+      display: block;
+      width: 100%;
+      max-width: 1920px;
+      margin-top: 8px;
+      border: 1px solid var(--line);
+    }
+    .key span {
+      margin-right: 16px;
+    }
     pre {
       max-height: 40vh;
       margin: 0;
@@ -145,11 +155,12 @@
     </script>
   </head>
   <body>
-    <h1>homr-web segnet bench</h1>
+    <h1>homr-web bench</h1>
     <p class="lede">
-      One page of sheet music through preprocess and segnet, at batch 8, 16 and
-      32. Press Run once for the cold numbers and again for the warm ones: the
-      second press must download zero model bytes.
+      One page of sheet music through preprocess, segnet and staff detection, at
+      batch 8, 16 and 32. Press Run once for the cold numbers and again for the
+      warm ones: the second press must download zero model bytes. The staffs
+      found are drawn over the page at the bottom.
     </p>
 
     <section>
@@ -176,6 +187,20 @@
     </section>
 
     <section>
+      <h2>Page</h2>
+      <fieldset id="fixture">
+        <label
+          ><input name="fixture" type="radio" value="the-kesh-300dpi">
+          The Kesh, four staffs</label
+        >
+        <label
+          ><input name="fixture" type="radio" value="grand-staff-300dpi">
+          piano, four braced systems</label
+        >
+      </fieldset>
+    </section>
+
+    <section>
       <h2>Run</h2>
       <button id="run" type="button">Run</button>
       <span id="progress"></span>
@@ -196,6 +221,7 @@
             <th>preprocess</th>
             <th>segment</th>
             <th>total</th>
+            <th>detect</th>
             <th>downloaded</th>
             <th>cached</th>
             <th>events</th>
@@ -209,6 +235,18 @@
     <section>
       <h2>Log</h2>
       <pre id="log"></pre>
+    </section>
+
+    <section>
+      <h2>Detection</h2>
+      <div id="detection">Not run yet.</div>
+      <p class="note key">
+        <span style="color: #00a2ff">staff lines, from staff.grid</span>
+        <span style="color: #19c37d">multi staff</span>
+        <span style="color: #e0218a">grand staff</span>
+        <span style="color: #ffb000">connection</span>
+      </p>
+      <canvas height="0" id="overlay" width="0"></canvas>
     </section>
 
     <script src="./bench.js" type="module"></script>
