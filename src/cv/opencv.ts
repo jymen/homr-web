@@ -82,8 +82,10 @@ const REQUIRED_MEMBERS = [
   "cvtColor",
   "dilate",
   "ellipse2Poly",
+  "erode",
   "findContours",
   "fitEllipse",
+  "getStructuringElement",
   "Mat",
   "matFromArray",
   "MatVector",
@@ -91,7 +93,9 @@ const REQUIRED_MEMBERS = [
   "morphologyEx",
   "pointPolygonTest",
   "PointVector",
+  "rotatedRectangleIntersection",
   "Size",
+  "subtract",
   "threshold",
 ] as const;
 

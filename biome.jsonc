@@ -88,6 +88,29 @@
       }
     },
     {
+      // src/geometry/ is the detection logic with no opencv.js in it, so that an
+      // ordering or tie rule can be tested without loading a 10.9 MB wasm
+      // module. What it needs from OpenCV it is handed as a BoxOps.
+      "includes": ["src/geometry/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["**/cv/**"],
+                    "message": "src/geometry/ takes a BoxOps (src/geometry/box-ops.ts), never src/cv/."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       // A library needs one entry point that re-exports its modules.
       "includes": ["src/index.ts"],
       "linter": {

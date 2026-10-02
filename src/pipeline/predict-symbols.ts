@@ -1,20 +1,19 @@
 /**
  * main.py's predict_symbols. The six call shapes in the whole pipeline are the
- * five here and brace_dot's, which is phase 5's because its mask comes from
- * prepare_brace_dot_image after detect_staff; there are no others, so these
- * parameters are the entire configuration surface of the box factories.
+ * five here and brace_dot's, whose mask is prepareBraceDotImage's and which
+ * detection fits itself; there are no others, so these parameters are the
+ * entire configuration surface of the box factories.
  *
  * The masks are the *filtered* five, after filter_predictions and
- * make_lines_stronger(staff, (1, 2)). Both of those are already baked into the
- * golden mask-filtered-*.png files, so this phase ports neither.
+ * make_lines_stronger(staff, (1, 2)).
  */
 
 import {
   createBoundingEllipses,
   createRotatedBoundingBoxes,
 } from "../cv/create-boxes.js";
+import { prepareBarLineImage } from "../cv/mask-morphology.js";
 import type { OpenCv } from "../cv/opencv.js";
-import { prepareBarLineImage } from "../geometry/barlines.js";
 import type { PredictedSymbols, SegmentationMasks } from "../model/pipeline.js";
 
 export function predictSymbols(

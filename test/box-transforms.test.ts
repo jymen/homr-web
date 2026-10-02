@@ -10,19 +10,19 @@ import {
   fitEllipseForGating,
   fitRotatedRect,
   fitRotatedRectUnchecked,
-  polygonViaBoxPoints,
 } from "../src/cv/box-fitting.js";
+import { makeBoxThicker } from "../src/cv/box-transforms.js";
+import { prepareBarLineImage } from "../src/cv/mask-morphology.js";
+import { withMatScope } from "../src/cv/opencv.js";
 import {
   ensureMinDimension,
   getCenterExtrapolated,
   isOverlappingExtrapolated,
   makeBoxTaller,
   makeBoxTallerKeepCenter,
-  makeBoxThicker,
   moveToXHorizontalBy,
-} from "../src/cv/box-transforms.js";
-import { withMatScope } from "../src/cv/opencv.js";
-import { prepareBarLineImage } from "../src/geometry/barlines.js";
+  polygonViaBoxPoints,
+} from "../src/geometry/box-transforms.js";
 import {
   type Ellipse,
   ellipseFromParts,

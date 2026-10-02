@@ -15,6 +15,7 @@
  * what the merged box is.
  */
 
+import { rotatedBoxFromRect } from "../geometry/box-transforms.js";
 import {
   type AngledBox,
   concatPointLists,
@@ -32,60 +33,14 @@ import {
   type RotatedRectParams,
   rawFitEllipseRectOf,
   rawMinAreaRectOf,
-  rotatedBoxFromParts,
   toLegacyAngleConvention,
 } from "../geometry/boxes.js";
-import { toFloat32, truncToInt } from "../image/numeric.js";
+import { truncToInt } from "../image/numeric.js";
 import { pointListToMat } from "./mat-points.js";
 import type { MatScope, OpenCv } from "./opencv.js";
 
 /** homr's min_length_to_fit_ellipse: "this is a requirement by opencv". */
 export const MIN_POINTS_TO_FIT_ELLIPSE = 5;
-
-/**
- * `cv2.boxPoints(box).astype(np.int64)`, reimplemented in float32 rather than
- * called, because the two builds do not compute it the same way.
- *
- * OpenCV's RotatedRect::points derives the first two corners from the centre,
- * the angle and the size; the older form then *reflects* the other two through
- * the centre, `pt[2] = 2 * centre - pt[0]`, and opencv-python 4.14.0 derives all
- * four directly. On a bit-identical rect the reflection can land exactly on an
- * integer where the direct form lands 3e-5 below it, and Python's int() then
- * differs by one: 4 coordinates of 5072 on the Kesh page, 3 of them in
- * staff_fragments entries whose *stored* rect is bit-exact, so nothing in the
- * stored data explains the difference and no rect-conditioned tolerance can
- * admit it.
- *
- * Measured 2026-09-28 over every entry of the four rotated golden lists whose
- * raw rect is bit-identical between the builds, 595 of 634: this reproduces
- * opencv-python 4.14.0's floats 595 of 595, and cv.boxPoints reproduces the
- * older reflecting form 595 of 595. phase-4-findings.md's "hand-rolling
- * boxPoints from OpenCV's C++ formula in float32 matched 0 of 967" does not
- * hold.
- *
- * The rect may be pre- or post-normalisation: this has no convention of its
- * own, it draws a rectangle from concrete numbers. float32 at every step, as the
- * C++ is; halving a float32 is exact, so only the products and sums are rounded.
- */
-export function polygonViaBoxPoints(rect: RotatedRectParams): PointList {
-  const radians = (rect.angle * Math.PI) / 180;
-  const halfSin = toFloat32(Math.sin(radians)) * 0.5;
-  const halfCos = toFloat32(Math.cos(radians)) * 0.5;
-  const sinH = toFloat32(halfSin * rect.h);
-  const cosW = toFloat32(halfCos * rect.w);
-  const cosH = toFloat32(halfCos * rect.h);
-  const sinW = toFloat32(halfSin * rect.w);
-  const left = toFloat32(rect.cx - sinH);
-  const right = toFloat32(rect.cx + sinH);
-  const upper = toFloat32(rect.cy - cosH);
-  const lower = toFloat32(rect.cy + cosH);
-  return pointListFromPairs([
-    [toFloat32(left - cosW), toFloat32(lower - sinW)],
-    [toFloat32(right - cosW), toFloat32(upper - sinW)],
-    [toFloat32(right + cosW), toFloat32(upper + sinW)],
-    [toFloat32(left + cosW), toFloat32(lower + sinW)],
-  ]);
-}
 
 /**
  * `cv2.ellipse2Poly((int(cx), int(cy)), (int(w / 2), int(h / 2)), int(angle),
@@ -126,19 +81,6 @@ function minAreaRectOf(
   return rawMinAreaRectOf(cv.minAreaRect(pointListToMat(cv, scope, contour)));
 }
 
-function rotatedBoxOf(
-  rect: LegacyConventionRect,
-  contour: PointList,
-  debugId: number
-): RotatedBox {
-  return rotatedBoxFromParts(
-    normalizeRotatedRect(rect),
-    polygonViaBoxPoints(rect),
-    contour,
-    debugId
-  );
-}
-
 function ellipseOf(
   cv: OpenCv,
   scope: MatScope,
@@ -165,7 +107,7 @@ export function fitRotatedRect(
   if (!hasValidRectSize(raw)) {
     return null;
   }
-  return rotatedBoxOf(toLegacyAngleConvention(raw), contour, debugId);
+  return rotatedBoxFromRect(toLegacyAngleConvention(raw), contour, debugId);
 }
 
 /**
@@ -180,7 +122,7 @@ export function fitRotatedRectUnchecked(
   contour: PointList,
   debugId: number
 ): RotatedBox {
-  return rotatedBoxOf(
+  return rotatedBoxFromRect(
     toLegacyAngleConvention(minAreaRectOf(cv, scope, contour)),
     contour,
     debugId
@@ -222,7 +164,7 @@ export function refitRotatedBoxFromGroup(
   group: readonly AngledBox[]
 ): RotatedBox {
   const contour = concatPointLists(group.map((box) => box.contour));
-  return rotatedBoxOf(
+  return rotatedBoxFromRect(
     toLegacyAngleConvention(minAreaRectOf(cv, scope, contour)),
     contour,
     0

@@ -29,8 +29,10 @@ const PORT_MEMBERS = [
   "cvtColor",
   "dilate",
   "ellipse2Poly",
+  "erode",
   "findContours",
   "fitEllipse",
+  "getStructuringElement",
   "Mat",
   "matFromArray",
   "MatVector",
@@ -38,7 +40,9 @@ const PORT_MEMBERS = [
   "morphologyEx",
   "pointPolygonTest",
   "PointVector",
+  "rotatedRectangleIntersection",
   "Size",
+  "subtract",
   "threshold",
 ];
 
@@ -71,6 +75,21 @@ describe("loadOpenCv", () => {
     const refused = loadOpenCv(() => Promise.resolve({ module: {} }));
     await expect(refused).rejects.toBeInstanceOf(CvError);
     await expect(refused).rejects.toThrow(NAMES_EVERY_MISSING_MEMBER);
+  });
+
+  it.each([
+    "erode",
+    "getStructuringElement",
+    "rotatedRectangleIntersection",
+    "subtract",
+  ])("refuses a build with no %s, and names it", async (name) => {
+    vi.resetModules();
+    const fresh = await import("../src/cv/opencv.js");
+    const { then: _then, [name]: _member, ...module } = thenableModule();
+    module.Mat = () => undefined;
+    await expect(
+      fresh.loadOpenCv(() => Promise.resolve({ module }))
+    ).rejects.toThrow(`no ${name}.`);
   });
 
   it("does not cache a rejected load, initializes once, then stops asking", async () => {

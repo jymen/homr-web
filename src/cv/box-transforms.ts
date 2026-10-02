@@ -1,26 +1,13 @@
 /**
- * homr's RotatedBoundingBox and BoundingEllipse mutators: box in, box out.
- *
- * None of them touches the angle, so the result is still inside [-45, 45] and
- * normalizeRotatedRect is never called again -- the new rect is the old one
- * spread with a changed dimension or centre. Each does recompute the outline
- * with a fresh boxPoints or ellipse2Poly call, because Python's constructor
- * recomputes it every time and a shape whose polygon did not follow its rect is
- * a shape whose overlap answers are stale.
+ * The one per-box mutator that needs opencv.js: an ellipse's outline is
+ * cv.ellipse2Poly. The others are in src/geometry/box-transforms.ts, and the
+ * rule they share holds here too: the angle is untouched, so the rect is never
+ * normalised again, and the outline is recomputed from the new rect.
  */
 
-import {
-  type AngledBox,
-  type RotatedBox,
-  type RotatedRect,
-  rotatedBoxFromParts,
-} from "../geometry/boxes.js";
-import { floorDiv } from "../image/numeric.js";
-import {
-  maxLineGapSize,
-  toleranceForStaffLineDetection,
-} from "../model/constants.js";
-import { polygonViaBoxPoints, polygonViaEllipse2Poly } from "./box-fitting.js";
+import { polygonViaBoxPoints } from "../geometry/box-transforms.js";
+import type { AngledBox, RotatedRect } from "../geometry/boxes.js";
+import { polygonViaEllipse2Poly } from "./box-fitting.js";
 import type { MatScope, OpenCv } from "./opencv.js";
 
 function rebuilt<B extends AngledBox>(
@@ -66,111 +53,4 @@ export function makeBoxThicker<B extends AngledBox>(
     h: box.rect.h + thickness,
     w: box.rect.w + thickness,
   } as RotatedRect);
-}
-
-/**
- * make_box_taller. **Always a RotatedBox**, an Ellipse included:
- * BoundingEllipse.make_box_taller returns a RotatedBoundingBox, silently
- * rectangularising the shape, and staff_detection depends on it because
- * is_intersecting exists only on the rotated class. The return type carries
- * that so no comment has to defend it at the call site.
- */
-export function makeBoxTaller(box: AngledBox, thickness: number): RotatedBox {
-  const rect = { ...box.rect, h: box.rect.h + thickness } as RotatedRect;
-  return rotatedBoxFromParts(
-    rect,
-    polygonViaBoxPoints(rect),
-    box.contour,
-    box.debugId
-  );
-}
-
-/** make_box_taller_keep_center: `cy - thickness // 2`, floor division, so -5 gives -3. */
-export function makeBoxTallerKeepCenter(
-  box: RotatedBox,
-  thickness: number
-): RotatedBox {
-  const rect = {
-    ...box.rect,
-    cy: box.rect.cy - floorDiv(thickness, 2),
-    h: box.rect.h + thickness,
-  } as RotatedRect;
-  return rotatedBoxFromParts(
-    rect,
-    polygonViaBoxPoints(rect),
-    box.contour,
-    box.debugId
-  );
-}
-
-export function moveToXHorizontalBy(
-  box: RotatedBox,
-  xDelta: number
-): RotatedBox {
-  const rect = { ...box.rect, cx: box.rect.cx + xDelta } as RotatedRect;
-  return rotatedBoxFromParts(
-    rect,
-    polygonViaBoxPoints(rect),
-    box.contour,
-    box.debugId
-  );
-}
-
-export function ensureMinDimension(
-  box: RotatedBox,
-  minWidth: number,
-  minHeight: number
-): RotatedBox {
-  const rect = {
-    ...box.rect,
-    h: Math.max(box.rect.h, minHeight),
-    w: Math.max(box.rect.w, minWidth),
-  } as RotatedRect;
-  return rotatedBoxFromParts(
-    rect,
-    polygonViaBoxPoints(rect),
-    box.contour,
-    box.debugId
-  );
-}
-
-/**
- * get_center_extrapolated: `(x - cx) * tan(angle / 180 * pi) + cy`.
- *
- * The multiplication order is kept as written. is_overlapping_extrapolated
- * inlines the same formula as `angle * pi / 180.0`, and `(a / 180) * pi` is not
- * `(a * pi) / 180` in float64, so there is deliberately no shared
- * degrees-to-radians helper in this port.
- */
-export function getCenterExtrapolated(box: RotatedBox, x: number): number {
-  return (
-    (x - box.rect.cx) * Math.tan((box.rect.angle / 180) * Math.PI) + box.rect.cy
-  );
-}
-
-/**
- * is_overlapping_extrapolated. Pure. `size[0] // 2` is Python floor division on
- * a float32 width, so floorDiv and not truncToInt.
- */
-export function isOverlappingExtrapolated(
-  a: RotatedBox,
-  b: RotatedBox,
-  unitSize: number
-): boolean {
-  const [left, right] = a.rect.cx > b.rect.cx ? [b, a] : [a, b];
-  const centerX = (left.rect.cx + right.rect.cx) * 0.5;
-  const maxGap = maxLineGapSize(unitSize);
-  if (
-    centerX - left.rect.cx - floorDiv(left.rect.w, 2) > maxGap ||
-    right.rect.cx - centerX - floorDiv(right.rect.w, 2) > maxGap
-  ) {
-    return false;
-  }
-  const leftY =
-    (centerX - left.rect.cx) * Math.tan((left.rect.angle * Math.PI) / 180) +
-    left.rect.cy;
-  const rightY =
-    (centerX - right.rect.cx) * Math.tan((right.rect.angle * Math.PI) / 180) +
-    right.rect.cy;
-  return Math.abs(leftY - rightY) <= toleranceForStaffLineDetection(unitSize);
 }
