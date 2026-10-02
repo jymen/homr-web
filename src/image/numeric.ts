@@ -8,7 +8,58 @@
  * where the Python calls round(), int() or `//`; call these instead.
  */
 
-/** `np.mean`; NaN on an empty input, as numpy (which also warns). */
+/** Below this many values numpy sums left to right; from it up, in eight lanes. */
+const PAIRWISE_LANES = 8;
+/** Above this many values numpy halves the range and recurses. */
+const PAIRWISE_BLOCK = 128;
+
+/**
+ * `np.sum` on float64, which is numpy's pairwise summation and not a left
+ * fold: the two differ from 8 values up. Python's builtin sum() is the left
+ * fold; a site that needs it writes its own loop.
+ */
+export function sum(values: ArrayLike<number>): number {
+  return pairwiseSum(values, 0, values.length);
+}
+
+function pairwiseSum(
+  values: ArrayLike<number>,
+  from: number,
+  count: number
+): number {
+  if (count < PAIRWISE_LANES) {
+    let acc = 0;
+    for (let i = 0; i < count; i += 1) {
+      acc += values[from + i] ?? 0;
+    }
+    return acc;
+  }
+  if (count > PAIRWISE_BLOCK) {
+    let half = Math.floor(count / 2);
+    half -= half % PAIRWISE_LANES;
+    return (
+      pairwiseSum(values, from, half) +
+      pairwiseSum(values, from + half, count - half)
+    );
+  }
+  const lanes = Float64Array.from({ length: PAIRWISE_LANES }, (_, lane) =>
+    Number(values[from + lane])
+  );
+  const laned = count - (count % PAIRWISE_LANES);
+  for (let i = PAIRWISE_LANES; i < laned; i += 1) {
+    const lane = i % PAIRWISE_LANES;
+    lanes[lane] = (lanes[lane] ?? 0) + (values[from + i] ?? 0);
+  }
+  const [r0 = 0, r1 = 0, r2 = 0, r3 = 0, r4 = 0, r5 = 0, r6 = 0, r7 = 0] =
+    lanes;
+  let acc = r0 + r1 + (r2 + r3) + (r4 + r5 + (r6 + r7));
+  for (let i = laned; i < count; i += 1) {
+    acc += values[from + i] ?? 0;
+  }
+  return acc;
+}
+
+/** `np.mean`, and `np.average` without weights; NaN on an empty input, as numpy (which also warns). */
 export function mean(values: ArrayLike<number>): number {
   if (values.length === 0) {
     return Number.NaN;
@@ -37,19 +88,23 @@ export function median(values: ArrayLike<number>): number {
   return (lower + upper) / 2;
 }
 
-/** `np.std` with ddof = 0 (population), numpy's default; not the sample std. */
+/**
+ * `np.std` with ddof = 0 (population), numpy's default; not the sample std.
+ * The squares are summed pairwise too, and the root is Math.sqrt: `** 0.5`
+ * is a different last bit on some inputs.
+ */
 export function std(values: ArrayLike<number>): number {
   const n = values.length;
   if (n === 0) {
     return Number.NaN;
   }
   const m = mean(values);
-  let acc = 0;
+  const squares = new Float64Array(n);
   for (let i = 0; i < n; i += 1) {
     const d = (values[i] ?? 0) - m;
-    acc += d * d;
+    squares[i] = d * d;
   }
-  return Math.sqrt(acc / n);
+  return Math.sqrt(sum(squares) / n);
 }
 
 /** `np.diff`: values[i + 1] - values[i]; length n - 1 (0 for n < 2). */
@@ -60,15 +115,6 @@ export function diff(values: ArrayLike<number>): Float64Array {
     out[i] = (values[i + 1] ?? 0) - (values[i] ?? 0);
   }
   return out;
-}
-
-/** `np.sum` accumulated left to right in float64. */
-export function sum(values: ArrayLike<number>): number {
-  let acc = 0;
-  for (const value of Array.from(values)) {
-    acc += value;
-  }
-  return acc;
 }
 
 /** `np.argmin`: index of the first minimum. Throws on empty input, as numpy. */
@@ -111,9 +157,23 @@ export function roundHalfEven(x: number): number {
   return rounded === 0 ? 0 : rounded;
 }
 
-/** Python's `//`: floor division toward minus infinity, also for negatives. */
+/**
+ * Python's `//` on floats, as CPython's float_floor_div computes it: from
+ * fmod, not from the quotient. `Math.floor(a / b)` is one too high when
+ * `a / b` rounds up to an integer the true quotient is below
+ * (-10.000000000000002 // 10 is -2, and the division gives -1 exactly).
+ */
 export function floorDiv(a: number, b: number): number {
-  return Math.floor(a / b);
+  const mod = a % b;
+  let div = (a - mod) / b;
+  if (mod !== 0 && b < 0 !== mod < 0) {
+    div -= 1;
+  }
+  if (div === 0) {
+    return 0;
+  }
+  const floored = Math.floor(div);
+  return div - floored > 0.5 ? floored + 1 : floored;
 }
 
 /** Python's int() on a float: truncation toward zero (also `astype(np.int64)`). */
@@ -172,4 +232,21 @@ export function formatPythonFloat(x: number): string {
     return `${x}.0`;
   }
   return String(x);
+}
+
+/**
+ * The half-open range a Python slice `[start:stop]` selects on an axis of
+ * `length`: a negative index counts from the end, an index past either end
+ * clamps, and a stop at or before the start selects nothing. An empty slice
+ * comes back as `stop === start`.
+ */
+export function pySliceBounds(
+  start: number,
+  stop: number,
+  length: number
+): { readonly start: number; readonly stop: number } {
+  const clamp = (index: number): number =>
+    Math.min(Math.max(index < 0 ? index + length : index, 0), length);
+  const from = clamp(start);
+  return { start: from, stop: Math.max(from, clamp(stop)) };
 }

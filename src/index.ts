@@ -20,6 +20,8 @@ export * from "./geometry/boxes.js";
 export * from "./golden/box-tolerance.js";
 export * from "./golden/decode.js";
 export * from "./golden/page.js";
+export * from "./image/argsort.js";
+export * from "./image/find-peaks.js";
 export * from "./image/numeric.js";
 export * from "./image/plane.js";
 export * from "./model/constants.js";

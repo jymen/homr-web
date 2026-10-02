@@ -8,6 +8,7 @@ import {
   formatPythonFloat,
   mean,
   median,
+  pySliceBounds,
   roundHalfEven,
   std,
   truncToInt,
@@ -37,6 +38,15 @@ describe("floorDiv and truncToInt", () => {
     expect(floorDiv(-7, 2)).toBe(-4);
     expect(floorDiv(-1, 20)).toBe(-1);
     expect(floorDiv(1, 20)).toBe(0);
+  });
+  it("floors the true quotient where a / b rounds up to an integer", () => {
+    expect(0.5 / 0.1).toBe(5);
+    expect(floorDiv(0.5, 0.1)).toBe(4);
+    expect(floorDiv(-5e-324, 10)).toBe(-1);
+    expect(floorDiv(-10.000_000_000_000_002, 10)).toBe(-2);
+    expect(floorDiv(29.999_999_999_999_996, 10)).toBe(2);
+    expect(floorDiv(-30, -10)).toBe(3);
+    expect(floorDiv(7.5, -10)).toBe(-1);
   });
   it("truncates toward zero like int()", () => {
     expect(truncToInt(2.9)).toBe(2);
@@ -93,4 +103,31 @@ describe("formatPythonFloat (str(float))", () => {
   ])("str(%s) = %s", (x, expected) => {
     expect(formatPythonFloat(x)).toBe(expected);
   });
+});
+
+describe("pySliceBounds (a Python slice on one axis)", () => {
+  it.each([
+    [0, 3, 10, 0, 3],
+    [-3, -1, 10, 7, 9],
+    [2, 50, 10, 2, 10],
+    [-20, 4, 10, 0, 4],
+    [12, 15, 10, 10, 10],
+    [0, 0, 0, 0, 0],
+  ])("[%s:%s] of %s is rows %s to %s", (start, stop, length, from, to) => {
+    expect(pySliceBounds(start, stop, length)).toEqual({
+      start: from,
+      stop: to,
+    });
+  });
+  it.each([
+    [-1, 2, 10],
+    [5, 2, 10],
+    [-1, 9, 10],
+  ])(
+    "[%s:%s] of %s is empty: a start of -1 is the last row",
+    (start, stop, length) => {
+      const bounds = pySliceBounds(start, stop, length);
+      expect(bounds.stop - bounds.start).toBe(0);
+    }
+  );
 });
