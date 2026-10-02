@@ -1,0 +1,13 @@
+{"meta": {
+ "numpy": "2.5.3",
+ "opencv": "4.14.0",
+ "python": "3.12.4",
+ "machine": "arm64",
+ "fragments": "[[cx, cy], [w, h], angle] rects",
+ "anchor": "the one StaffAnchor both staffs hold: its symbol's rect and its lines as indices into fragments",
+ "lines": "five lines as indices into fragments; in merged, in each line's own order",
+ "merged": "self.merge(other): RawStaff.merge"
+},
+"cases": [
+{"name":"two fragments at one centre x","fragments":[[[100.0,100.0],[100.0,3.0],0.0],[[100.0,118.0],[100.0,3.0],0.0],[[100.0,136.0],[100.0,3.0],0.0],[[100.0,154.0],[100.0,3.0],0.0],[[100.0,172.0],[100.0,3.0],0.0],[[100.0,101.0],[100.0,5.0],0.0],[[100.0,119.0],[100.0,5.0],0.0],[[100.0,137.0],[100.0,5.0],0.0],[[100.0,155.0],[100.0,5.0],0.0],[[100.0,173.0],[100.0,5.0],0.0]],"anchor":{"symbol":[[100.0,136.0],[4.0,72.0],0.0],"lines":[[0],[1],[2],[3],[4]],"averageUnitSize":18.0},"self":{"staffId":7,"lines":[[0],[1],[2],[3],[4]]},"other":{"staffId":9,"lines":[[5],[6],[7],[8],[9]]},"merged":{"staffId":7,"lines":[[5,0],[6,1],[7,2],[8,3],[9,4]],"anchors":2}}
+]}

@@ -1,0 +1,14 @@
+{"meta": {
+ "numpy": "2.5.3",
+ "opencv": "4.14.0",
+ "python": "3.12.4",
+ "machine": "arm64",
+ "peaks": "row ordinates, ascending, as find_horizontal_lines passes them",
+ "groups": "filter_line_peaks(peaks, norm)[1]: the group index of each peak"
+},
+"cases": [
+{"name":"three staffs 30 apart, lines 19 apart","peaks":[100,119,138,157,176,206,225,244,263,282,312,331,350,369,388],"groups":[0,0,0,0,0,1,1,1,1,1,2,2,2,2,2]},
+{"name":"six even peaks","peaks":[10,20,30,40,50,60],"groups":[0,0,0,0,0,0]},
+{"name":"two peaks","peaks":[40,60],"groups":[0,0]},
+{"name":"one peak","peaks":[40],"groups":[-1]}
+]}

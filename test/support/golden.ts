@@ -25,10 +25,15 @@ export interface GoldenFixture {
   readonly name: string;
 }
 
+/** Directories under test/golden/ that hold something other than one page's dump. */
+const NOT_A_FIXTURE: ReadonlySet<string> = new Set(["local", "vectors"]);
+
 const fixturesIn = (dir: string): GoldenFixture[] =>
   existsSync(dir)
     ? readdirSync(dir, { withFileTypes: true })
-        .filter((entry) => entry.isDirectory() && entry.name !== "local")
+        .filter(
+          (entry) => entry.isDirectory() && !NOT_A_FIXTURE.has(entry.name)
+        )
         .map((entry) => ({ dir: join(dir, entry.name), name: entry.name }))
     : [];
 

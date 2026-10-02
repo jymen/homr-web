@@ -1,6 +1,6 @@
 {
- "fixture": "the-kesh-300dpi.png",
- "imageSha256": "a7a728b253a9ffe3f96be83dc04f206ee046d7d245fcce12ba5a35e51d38b556",
+ "fixture": "grand-staff-300dpi.png",
+ "imageSha256": "2692b02bbfc05fde0abaff6247b2c828b9d708547ea6e6d1ced03d29b1805af9",
  "homrVersion": "0.7.0",
  "models": {
   "segnet": "segnet_308-3296ccd40960f90ca6ab9c035cca945675d30a0f.onnx:6ed36640db4ef5d223098b6d5efe4eda97c66b24a2c72faab8a018c749003a8d",

@@ -3,10 +3,17 @@ output under test/golden/<fixture>/. The TypeScript tests read these files.
 
 Nothing in homr is patched: the script calls the same functions main.py
 calls, in the same order, on the CPU with the fp32 models, and saves what
-they return. Run twice, it writes byte-identical files."""
+they return. Run twice, it writes byte-identical files.
+
+Four homr functions are unrolled into the calls they make, so that their
+intermediate values can be saved: create_noise_grid, detect_staff,
+add_notes_to_staffs and find_braces_brackets_and_grand_staff_lines. Each
+unrolled block is followed by a call of the real function, and the script
+exits non-zero unless the two results serialise identically."""
 
 import hashlib
 import json
+import platform
 import sys
 from enum import Enum
 from pathlib import Path
@@ -18,22 +25,50 @@ from PIL import Image
 
 ort.set_default_logger_severity(3)
 
-from homr import color_adjust  # noqa: E402
+from homr import color_adjust, constants  # noqa: E402
 from homr.autocrop import autocrop  # noqa: E402
 from homr.bar_line_detection import detect_bar_lines  # noqa: E402
-from homr.bounding_boxes import create_rotated_bounding_boxes  # noqa: E402
+from homr.bounding_boxes import RotatedBoundingBox, create_rotated_bounding_boxes  # noqa: E402
 from homr.brace_dot_detection import (  # noqa: E402
+    _create_grandstaffs,
+    _filter_for_tall_elements,
+    _get_connections_between_staffs,
+    _merge_multi_staff_if_they_share_a_staff,
     find_braces_brackets_and_grand_staff_lines,
     prepare_brace_dot_image,
 )
 from homr.debug import Debug  # noqa: E402
 from homr.main import download_weights, get_predictions, predict_symbols  # noqa: E402
+from homr.model import MultiStaff, Note  # noqa: E402
 from homr.music_xml_generator import XmlGeneratorArguments, generate_xml  # noqa: E402
-from homr.noise_filtering import filter_predictions  # noqa: E402
-from homr.note_detection import add_notes_to_staffs, combine_noteheads_with_stems  # noqa: E402
+from homr.noise_filtering import (  # noqa: E402
+    apply_noise_filter,
+    create_grid,
+    filter_predictions,
+    handle_filter_results,
+)
+from homr.note_detection import (  # noqa: E402
+    add_notes_to_staffs,
+    combine_noteheads_with_stems,
+    split_clumps_of_noteheads,
+)
 from homr.resize import resize_image  # noqa: E402
 from homr.segmentation.config import segnet_path_onnx  # noqa: E402
-from homr.staff_detection import break_wide_fragments, detect_staff, make_lines_stronger  # noqa: E402
+from homr.staff_detection import (  # noqa: E402
+    break_wide_fragments,
+    detect_staff,
+    filter_edge_of_vision,
+    filter_unusual_anchors,
+    find_horizontal_lines,
+    find_raw_staffs_by_connecting_line_fragments,
+    find_staff_anchors,
+    init_zone,
+    make_lines_stronger,
+    predict_other_anchors_from_clefs,
+    remove_duplicate_staffs,
+    resample_staffs,
+    sort_staffs_top_to_bottom,
+)
 from homr.staff_parsing import (  # noqa: E402
     _ensure_same_number_of_staffs,
     _get_number_of_voices,
@@ -113,6 +148,205 @@ def symbols_json(symbols: list[EncodedSymbol]):
     ]
 
 
+def positions_in(items, of: list, what: str) -> list[int]:
+    """Where each of `items` sits in `of`, by object identity: homr passes the
+    same objects from stage to stage, and two of them may compare equal."""
+    index = {id(item): i for i, item in enumerate(of)}
+    missing = [item for item in items if id(item) not in index]
+    if missing:
+        raise SystemExit(f"{what}: {len(missing)} object(s) that are not in the list they index")
+    return [index[id(item)] for item in items]
+
+
+def require_same(what: str, unrolled, real) -> None:
+    if json.dumps(jsonable(unrolled)) != json.dumps(jsonable(real)):
+        raise SystemExit(f"{what}: the unrolled calls and homr's own function disagree")
+
+
+def unrolled_noise_grid(staff: np.ndarray):
+    """create_noise_grid (noise_filtering.py:18) on 255 * staff, as
+    filter_predictions calls it. Returns the noise.json value and the mask,
+    which is None unless the outcome is masked."""
+    gray = 255 * staff
+    height, width = gray.shape
+    tile_height, tile_width = height // 20, width // 20
+    grid = create_grid(gray, tile_height, tile_width)
+    mask = np.zeros(gray.shape, dtype=np.uint8)
+    debug_image = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+    filtered, total = apply_noise_filter(grid, mask, debug_image, tile_height, tile_width)
+    kept_mask = handle_filter_results(filtered, total, mask)
+    if kept_mask is not None:
+        outcome = "masked"
+    elif filtered > 0:
+        outcome = "skipped"
+    else:
+        outcome = "clean"
+    noise = {
+        "tile": [tile_height, tile_width],
+        "grid": grid,
+        "filtered": filtered,
+        "total": total,
+        "outcome": outcome,
+    }
+    return noise, kept_mask
+
+
+def anchor_json(anchor, fragments: list):
+    return {
+        "symbol": anchor.symbol,
+        "lines": [
+            positions_in(line.staff_fragments, fragments, "anchor line")
+            for line in anchor.staff_lines
+        ],
+        "averageUnitSize": anchor.average_unit_size,
+        "minY": anchor.min_y,
+        "maxY": anchor.max_y,
+        "zone": [anchor.zone.start, anchor.zone.stop],
+    }
+
+
+def unrolled_detect_staff(image: np.ndarray, fragments: list, clefs_keys: list, bar_lines: list):
+    """detect_staff (staff_detection.py:694). Returns the staffs and the
+    staff-anchors.json, raw-staffs.json and other-clefs.json values."""
+    clef_anchors = find_staff_anchors(fragments, clefs_keys, are_clefs=True)
+    zones = []
+    other_clef_candidates = []
+    if len(clef_anchors) > 0:
+        # predict_other_anchors_from_clefs (638) computes these and keeps only
+        # the boxes that overlap no clef anchor's symbol.
+        unit_size = float(np.mean([anchor.average_unit_size for anchor in clef_anchors]))
+        for zone in init_zone(clef_anchors, image.shape):
+            lines = find_horizontal_lines(image[:, zone], unit_size)
+            zones.append({"start": zone.start, "stop": zone.stop, "lines": lines})
+            for group in lines:
+                min_y = min(group)
+                max_y = max(group)
+                center_y = (min_y + max_y) / 2
+                center_x = zone.start + (zone.stop - zone.start) / 2
+                rect = ((int(center_x), int(center_y)), (zone.stop - zone.start, int(max_y - min_y)), 0)
+                other_clef_candidates.append(RotatedBoundingBox(rect, np.array([]), 0))
+    other_clef_symbols = predict_other_anchors_from_clefs(clef_anchors, image)
+    anchor_symbols = [anchor.symbol for anchor in clef_anchors]
+    require_same(
+        "predict_other_anchors_from_clefs",
+        [box for box in other_clef_candidates if not box.is_overlapping_with_any(anchor_symbols)],
+        other_clef_symbols,
+    )
+    other_clef_anchors = find_staff_anchors(fragments, other_clef_symbols, are_clefs=True)
+    bar_line_anchors = find_staff_anchors(fragments, bar_lines, are_clefs=False)
+    all_anchors = clef_anchors + other_clef_anchors + bar_line_anchors
+    kept = filter_unusual_anchors(all_anchors)
+
+    connected = find_raw_staffs_by_connecting_line_fragments(kept, fragments)
+    deduplicated = remove_duplicate_staffs(connected)
+    resampled = resample_staffs(deduplicated)
+    in_view = filter_edge_of_vision(resampled, image.shape)
+    staffs = sort_staffs_top_to_bottom(in_view)
+
+    anchors = {
+        "clefs": [anchor_json(a, fragments) for a in clef_anchors],
+        "zones": zones,
+        "otherClefSymbols": other_clef_symbols,
+        "otherClefs": [anchor_json(a, fragments) for a in other_clef_anchors],
+        "barLines": [anchor_json(a, fragments) for a in bar_line_anchors],
+        "kept": positions_in(kept, all_anchors, "kept anchors"),
+    }
+    kept_in_view = {id(staff) for staff in in_view}
+    raw_staffs = {
+        "connected": [
+            {
+                "box": raw.box,
+                "polygon": raw.polygon,
+                "staffId": raw.staff_id,
+                "lines": [
+                    positions_in(line.staff_fragments, fragments, "raw staff line")
+                    for line in raw.lines
+                ],
+                "anchors": positions_in(raw.anchors, kept, "raw staff anchors"),
+            }
+            for raw in connected
+        ],
+        "deduplicated": positions_in(deduplicated, connected, "deduplicated staffs"),
+        "resampledFrom": positions_in(staffs, resampled, "resampled staffs"),
+        "droppedAtEdge": [i for i, staff in enumerate(resampled) if id(staff) not in kept_in_view],
+    }
+    return staffs, anchors, raw_staffs, other_clef_candidates
+
+
+def unrolled_add_notes(staffs: list, noteheads: list, notehead_pred: np.ndarray):
+    """add_notes_to_staffs (note_detection.py:149) without its staff.add_symbol,
+    so it leaves the staffs as it found them. Returns the notes and the
+    notehead-splits.json value."""
+    notes = []
+    splits = []
+    for i, staff in enumerate(staffs):
+        for j, chunk in enumerate(noteheads):
+            if not staff.is_on_staff_zone(chunk.notehead):
+                continue
+            center = chunk.notehead.center
+            point = staff.get_at(center[0])
+            if point is None:
+                continue
+            if (
+                chunk.notehead.size[0] < 0.5 * point.average_unit_size
+                or chunk.notehead.size[1] < 0.5 * point.average_unit_size
+            ):
+                continue
+            pieces = split_clumps_of_noteheads(chunk, notehead_pred, staff)
+            if len(pieces) > 1:
+                splits.append(
+                    {"staff": i, "notehead": j, "pieces": [piece.notehead for piece in pieces]}
+                )
+            for piece in pieces:
+                point = staff.get_at(center[0])
+                if point is None:
+                    continue
+                if (
+                    piece.notehead.size[0] < 0.5 * point.average_unit_size
+                    or piece.notehead.size[0] > 3 * point.average_unit_size
+                    or piece.notehead.size[1] < 0.5 * point.average_unit_size
+                    or piece.notehead.size[1] > 2 * point.average_unit_size
+                ):
+                    continue
+                position = point.find_position_in_unit_sizes(piece.notehead)
+                notes.append(Note(piece.notehead, position, piece.stem, piece.stem_direction))
+    return notes, splits
+
+
+def unrolled_braces(staffs: list, brace_dot: list):
+    """find_braces_brackets_and_grand_staff_lines (brace_dot_detection.py:142).
+    Returns the multi staffs and the braces.json value."""
+    tall = _filter_for_tall_elements(brace_dot, staffs)
+    connections = []
+    result = []
+    for i, staff in enumerate(staffs):
+        neighbours = [k for k in (i - 1, i + 1) if 0 <= k < len(staffs)]
+        any_connected_neighbour = False
+        for k in neighbours:
+            found = _get_connections_between_staffs(staff, staffs[k], tall)
+            if len(found) > 0:
+                connections.append(
+                    {
+                        "staff": i,
+                        "neighbour": k,
+                        "symbols": positions_in(found, brace_dot, "brace connections"),
+                    }
+                )
+            if len(found) >= constants.minimum_connections_to_form_combined_staff:
+                result.append(MultiStaff([staff, staffs[k]], found))
+                any_connected_neighbour = True
+        if not any_connected_neighbour:
+            result.append(MultiStaff([staff], []))
+    merged = _merge_multi_staff_if_they_share_a_staff(result)
+    braces = {
+        "notesPerStaff": [len(staff.get_notes()) for staff in staffs],
+        "tall": positions_in(tall, brace_dot, "tall brace_dot elements"),
+        "connections": connections,
+        "merged": [positions_in(multi.staffs, staffs, "merged multi staff") for multi in merged],
+    }
+    return _create_grandstaffs(merged, tall), braces
+
+
 def golden_dir_for(image_path: Path) -> Path:
     """Private pages live in test/fixtures/local/ and their golden data in
     test/golden/local/; both are git-ignored. Everything else is public."""
@@ -141,7 +375,20 @@ def dump(image_path: Path, config: Config) -> None:
         write_mask(out / f"mask-{name}.png", getattr(predictions, name))
 
     debug = Debug(predictions.original, str(image_path), False)
+    noise, noise_mask = unrolled_noise_grid(predictions.staff)
+    raw_predictions = predictions
     predictions = filter_predictions(predictions, debug)
+    if (predictions is raw_predictions) != (noise_mask is None):
+        raise SystemExit("noise: the unrolled calls and filter_predictions disagree on masking")
+    if noise_mask is not None:
+        masked_staff = cv2.bitwise_and(raw_predictions.staff, raw_predictions.staff, mask=noise_mask)
+        if not np.array_equal(masked_staff, predictions.staff):
+            raise SystemExit("noise: the unrolled mask is not the one filter_predictions applied")
+        write_mask(out / "mask-noise.png", noise_mask)
+    else:
+        (out / "mask-noise.png").unlink(missing_ok=True)
+    write_json(out / "noise.json", noise)
+    write_mask(out / "mask-denoised-staff.png", predictions.staff)
     predictions.staff = make_lines_stronger(predictions.staff, (1, 2))
     for name in ("staff", "symbols", "stems_rest", "notehead", "clefs_keys"):
         write_mask(out / f"mask-filtered-{name}.png", getattr(predictions, name))
@@ -175,9 +422,16 @@ def dump(image_path: Path, config: Config) -> None:
         {"averageNoteHeadHeight": average_note_head_height, "barLines": bar_line_boxes},
     )
 
+    unrolled_staffs, staff_anchors, raw_staffs, other_clef_candidates = unrolled_detect_staff(
+        predictions.staff, symbols.staff_fragments, symbols.clefs_keys, bar_line_boxes
+    )
     staffs = detect_staff(
         debug, predictions.staff, symbols.staff_fragments, symbols.clefs_keys, bar_line_boxes
     )
+    require_same("detect_staff", unrolled_staffs, staffs)
+    write_json(out / "staff-anchors.json", staff_anchors)
+    write_json(out / "other-clefs.json", other_clef_candidates)
+    write_json(out / "raw-staffs.json", raw_staffs)
     write_json(out / "staffs.json", staffs)
     if len(staffs) == 0:
         raise SystemExit("No staffs found")
@@ -187,11 +441,21 @@ def dump(image_path: Path, config: Config) -> None:
     brace_dot = create_rotated_bounding_boxes(brace_dot_img, skip_merging=True, max_size=(100, -1))
     write_json(out / "boxes-brace_dot.json", brace_dot)
 
+    unrolled_notes, notehead_splits = unrolled_add_notes(
+        staffs, noteheads_with_stems, predictions.notehead
+    )
     notes = add_notes_to_staffs(
         staffs, noteheads_with_stems, predictions.symbols, predictions.notehead
     )
+    require_same("add_notes_to_staffs", unrolled_notes, notes)
+    write_json(out / "notehead-splits.json", notehead_splits)
     write_json(out / "notes.json", notes)
+    unrolled_multi_staffs, braces = unrolled_braces(staffs, brace_dot)
     multi_staffs = find_braces_brackets_and_grand_staff_lines(debug, staffs, brace_dot)
+    require_same(
+        "find_braces_brackets_and_grand_staff_lines", unrolled_multi_staffs, multi_staffs
+    )
+    write_json(out / "braces.json", braces)
     write_json(out / "multistaffs.json", multi_staffs)
 
     save_staff_positions(multi_staffs, predictions.preprocessed.shape, str(out / "staff-positions.txt"))
@@ -233,6 +497,12 @@ def dump(image_path: Path, config: Config) -> None:
             "decoder": f"{Path(config.filepaths.decoder_path).name}:{sha256_of(Path(config.filepaths.decoder_path))}",
         },
         "stages": sorted(p.name for p in out.iterdir() if p.name != "meta.json"),
+        "oracle": {
+            "numpy": np.__version__,
+            "opencv": cv2.__version__,
+            "python": platform.python_version(),
+            "machine": platform.machine(),
+        },
     }
     (out / "meta.json").write_text(json.dumps(meta, indent=1) + "\n")
 
