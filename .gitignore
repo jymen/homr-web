@@ -1,6 +1,9 @@
 node_modules/
 dist/
 .venv/
+.venv-export/
+# tools/export-decoder.py: the pinned homr clone and the 278 MB checkpoint
+.export/
 *.onnx
 *.npy
 .DS_Store
