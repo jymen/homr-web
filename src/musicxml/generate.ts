@@ -958,9 +958,6 @@ function buildScorePart(index: number, hasTwoStaves: boolean): XmlElement {
     ? ["Piano", "keyboard.piano", 1]
     : ["Voice", "voice", 54];
   const id = partId(index);
-  if (index + 1 > 16) {
-    throw new MusicXmlError(`midi-channel ${index + 1} is above 16`);
-  }
   const part = new XmlElement("score-part", { id });
   part.add(leaf("part-name", name));
   const instrument = part.add(
