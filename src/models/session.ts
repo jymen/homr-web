@@ -257,8 +257,7 @@ export async function readFloat32(tensor: Tensor): Promise<Float32Array> {
  *
  * This exists so the mixed-precision arrangement lives in phase 2 as data
  * (ResolvedModel.handoff, derived from two measured TensorSpecs) and in one
- * function, instead of as two lines of dtype-aware code in phase 7 that phase 8
- * would then have to find and delete.
+ * function, instead of as two lines of dtype-aware code in phase 7.
  */
 export async function handoff(
   tensor: Tensor,
@@ -274,8 +273,9 @@ export async function handoff(
     );
   }
   const wants = to.inputSpec(plan.input).type;
-  // After phase 8 the dtypes agree on WebGPU too and the 1280x512 context never
-  // leaves the GPU, without this line changing.
+  // On WebGPU the fp16 encoder hands a half context to a decoder whose edges
+  // are float32, so the cast below still runs there; were the dtypes to agree,
+  // the context would stay on the GPU without this line changing.
   if (
     plan.cast === "none" &&
     !(plan.location === "cpu" && tensor.location !== "cpu")

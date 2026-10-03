@@ -90,9 +90,9 @@ export class DecoderState {
     }
     this.#feeds.cache_len = new Tensor("int64", this.#cacheLen, [1]);
     this.#feeds.context = context;
-    // context[:, :1], built once. Float32 on the CPU only: on every placement
-    // today the decoder is the fp32 artifact on WebAssembly, and handoff has
-    // already cast and downloaded the context. Phase 8 revisits this.
+    // context[:, :1], built once. Float32 on the CPU on every placement: both
+    // decoder artifacts take float32 at their edges, and handoff has already
+    // cast and downloaded the context.
     this.#reducedContext = new Tensor(
       "float32",
       context.data.slice(0, CONTEXT_WIDTH),

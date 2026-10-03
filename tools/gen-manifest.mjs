@@ -1,5 +1,6 @@
 // Regenerates src/models/manifest.ts's ARTIFACTS block and decoder tensor-name
-// tuples from the eight files tools/fetch-models.sh puts in models/. Every
+// tuples from the nine files in models/: eight from tools/fetch-models.sh, one from
+// tools/export-decoder.py. Every
 // value it writes is a fact about a file: the SHA-256, the byte length, and the
 // input/output names, shapes and element types read from the opened session.
 // Nothing it writes is a judgement; MODEL_ROLES and resolveRole are
@@ -23,6 +24,8 @@ const target = join(root, "src/models/manifest.ts");
 const FILES = {
   "decoder-396-fp32":
     "decoder_pytorch_model_396-f6feedb42ff90087d898b0941a55d040fa6b2903.onnx",
+  "decoder-396-web-fp16":
+    "decoder_pytorch_model_396-f6feedb42ff90087d898b0941a55d040fa6b2903_web_fp16.onnx",
   "encoder-396-fp16":
     "encoder_pytorch_model_396-f6feedb42ff90087d898b0941a55d040fa6b2903_fp16.onnx",
   "encoder-396-fp32":
@@ -159,6 +162,20 @@ for (const [id, filename] of Object.entries(FILES)) {
 
 if (decoder === undefined) {
   throw new Error("no decoder artifact: the cache tuples cannot be generated");
+}
+
+// Phase 7 feeds every decoder through the one set of tuples generated below,
+// so a re-export that renamed, reordered or retyped a tensor must stop here.
+const contractOf = (specs) =>
+  specs.map((s) => `${s.name}:${s.type}`).join(", ");
+for (const record of records) {
+  if (
+    record.id.startsWith("decoder-") &&
+    (contractOf(record.inputs) !== contractOf(decoder.inputs) ||
+      contractOf(record.outputs) !== contractOf(decoder.outputs))
+  ) {
+    throw new Error(`${record.id} breaks decoder-396-fp32's tensor contract`);
+  }
 }
 
 const artifacts = records

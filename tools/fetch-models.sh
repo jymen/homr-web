@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Assembles the eight ONNX artifacts phase 2 pins into models/, which is
+# Assembles eight of the nine ONNX artifacts phase 2 pins into models/, which is
 # git-ignored. Six come from the pinned venv (tools/venv.sh installs homr
 # 0.7.0 and rapidocr); the two fp16 ones are homr's own release assets, which
 # the venv only downloads when it runs on a GPU. Idempotent: anything already
@@ -76,3 +76,6 @@ done
 
 echo "models/: $copied copied, $fetched fetched, $skipped already present"
 ls -1 "$models"
+if [ ! -f "$models/decoder_pytorch_model_396-f6feedb42ff90087d898b0941a55d040fa6b2903_web_fp16.onnx" ]; then
+  echo "the WebGPU decoder is not released anywhere: run tools/export-venv.sh, then .venv-export/bin/python tools/export-decoder.py" >&2
+fi

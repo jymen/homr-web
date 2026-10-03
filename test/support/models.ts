@@ -32,7 +32,8 @@ import {
   ModelStore,
 } from "../../src/models/store.js";
 
-export const FETCH_MODELS_HINT = "models/ absent, run tools/fetch-models.sh";
+export const FETCH_MODELS_HINT =
+  "models/ incomplete, run tools/fetch-models.sh and tools/export-decoder.py";
 
 export function modelsDir(): string {
   return join(import.meta.dirname, "..", "..", "models");
@@ -42,7 +43,7 @@ const fileNameOf = (artifact: ArtifactRecord): string =>
   artifact.urlPath.slice(artifact.urlPath.lastIndexOf("/") + 1);
 
 /**
- * Every one of the eight artifacts, not merely the directory: fetch-models.sh
+ * Every one of the nine artifacts, not merely the directory: fetch-models.sh
  * creates models/ before it copies anything, so an interrupted first run leaves
  * a directory that exists and serves nothing. A partial fetch must read as
  * absent, or CI's presence assertion passes on bytes it does not have.

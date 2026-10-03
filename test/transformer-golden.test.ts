@@ -14,7 +14,12 @@ import {
 } from "../src/pipeline/parse-staffs.js";
 import type { EncodedSymbol } from "../src/transformer/symbol.js";
 import { goldenPageOf, listGoldenFixtures } from "./support/golden.js";
-import { CPU, describeWithModels, storeOn } from "./support/models.js";
+import {
+  CPU,
+  describeWithModels,
+  FP16_ON_WASM,
+  storeOn,
+} from "./support/models.js";
 import { testOpenCv } from "./support/opencv.js";
 
 /**
@@ -125,3 +130,50 @@ describeWithModels("transformer on Python's staff canvases", () => {
     );
   }
 });
+
+/**
+ * The WebGPU path's artifacts, the fp16 encoder and tools/export-decoder.py's
+ * re-exported decoder, on the WebAssembly provider: the CI view of what the
+ * bench runs on WebGPU. Tokens only. The re-export is unfused and not int8, so
+ * its attention coordinates move against the shipped decoder's by up to 9 px
+ * with every token equal (tools/verify-decoder.py), past the 6 px above.
+ */
+describeWithModels(
+  "transformer with the WebGPU artifacts on WebAssembly",
+  () => {
+    for (const fixture of listGoldenFixtures()) {
+      it(
+        `${fixture.name}: every canvas gives tokens-<n>.json`,
+        async () => {
+          const golden = goldenPageOf(fixture);
+          const store = await storeOn(FP16_ON_WASM);
+          try {
+            const sessions: TransformerSessions = {
+              decoder: await store.open("decoder"),
+              encoder: await store.open("encoder"),
+            };
+            expect(sessions.decoder.plan.artifactId).toBe(
+              "decoder-396-web-fp16"
+            );
+            for (let index = 0; index < golden.staffCount(); index += 1) {
+              // biome-ignore lint/performance/noAwaitInLoops: one staff at a time, as homr runs them
+              const tokens = await parseStaffCanvas(
+                sessions,
+                createStaffCanvas(
+                  golden.canvas(index),
+                  golden.canvasStaff(index)
+                )
+              );
+              expect(`canvas ${index}: ${tokens.map(heads).join(" | ")}`).toBe(
+                `canvas ${index}: ${golden.tokens(index).map(heads).join(" | ")}`
+              );
+            }
+          } finally {
+            await store.close();
+          }
+        },
+        STAFF_TIMEOUT_MS * 4
+      );
+    }
+  }
+);

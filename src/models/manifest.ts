@@ -1,12 +1,12 @@
 /**
  * Which file each model role uses, on which execution provider, and which of
  * its outputs are left in GPU buffers. Two tables and one derivation: the
- * artifacts between the markers are measured facts about the eight files on
+ * artifacts between the markers are measured facts about the nine files on
  * disk, written by tools/gen-manifest.mjs; MODEL_ROLES above them is
  * hand-written policy, one row per role, each citing homr's source.
  *
  * This is the only module in the library that expresses the fp16-on-GPU /
- * fp32-on-CPU arrangement and the decoder's forced stay on WebAssembly. No
+ * fp32-on-CPU arrangement. No
  * other function and no call site branches on a backend or on a precision.
  * There is no I/O here.
  */
@@ -18,7 +18,7 @@ import { ModelError } from "./errors.js";
 export const EXECUTION_PROVIDERS = ["wasm", "webgpu"] as const;
 export type ExecutionProvider = (typeof EXECUTION_PROVIDERS)[number];
 
-/** The three ONNX element types the eight artifacts use. Narrowed on purpose: a fourth means the generator saw something new and the design should be looked at. */
+/** The three ONNX element types the nine artifacts use. Narrowed on purpose: a fourth means the generator saw something new and the design should be looked at. */
 export type TensorElementType = "float16" | "float32" | "int64";
 
 /**
@@ -50,18 +50,19 @@ export interface ArtifactRecord {
 }
 
 /**
- * The eight files, by a label that names the model, its homr version and its
+ * The nine files, by a label that names the model, its homr version and its
  * precision. The precision lives in the id and not in a field: the
  * load-bearing fact is the measured element type on each TensorSpec, and a
  * `precision` field would answer "which file" and "what do I write into the
  * tensor" with one value when the two are different questions.
  *
  * There is no decoder-396-fp16 row. homr's release has one and uses it on CUDA
- * only; nothing in this port can reach it, and a row nothing can reach goes
- * stale silently.
+ * only, fused, so the WebGPU EP cannot run it; a row nothing can reach goes
+ * stale silently. decoder-396-web-fp16 is this port's own re-export.
  */
 export const ARTIFACT_IDS = [
   "decoder-396-fp32",
+  "decoder-396-web-fp16",
   "encoder-396-fp16",
   "encoder-396-fp32",
   "ppocr-v2-cls-mobile",
@@ -112,16 +113,16 @@ export interface RolePolicy {
 export const MODEL_ROLES = {
   decoder: {
     cpu: "decoder-396-fp32",
+    // The shipped decoder is fused (com.microsoft SkipLayerNormalization, with
+    // no WebGPU kernel) and int8, so the GPU path takes tools/export-decoder.py's
+    // unfused re-export of the same checkpoint, fp16 inside and float32 at its
+    // edges. The WebAssembly path keeps homr's fp32 CPU file: homr finds the
+    // fp16 model "slower than the fp32 model on the CPU EP"
+    // (homr/onnx_providers.py:1-16).
     onWebgpu: {
-      kind: "stay-on-cpu",
-      // Two independent reasons, and both must go before this row changes.
-      // 1. The shipped decoder has no SkipLayerNormalization kernel on the
-      //    WebGPU EP; phase 8 re-exports it from the public checkpoint.
-      // 2. homr keeps the decoder on its CPU EP with the fp32 model because
-      //    "the fp16 model ... is slower than the fp32 model on the CPU EP"
-      //    (homr/onnx_providers.py:1-16). That reason survives phase 8 for the
-      //    WebAssembly path, and is why ARTIFACTS has no decoder fp16 row.
-      why: "the shipped decoder has no SkipLayerNormalization kernel on the WebGPU EP; phase 8 re-exports it",
+      artifact: "decoder-396-web-fp16",
+      keepOutputsOnGpu: [],
+      kind: "gpu",
     },
   },
   encoder: {
@@ -188,7 +189,7 @@ export interface Placement {
 }
 
 export interface Handoff {
-  /** "none" when the two artifacts agree on the element type; otherwise the cast, derived by comparing two measured TensorSpecs. Never written down twice, and it disappears on its own the moment phase 8 makes the dtypes agree. */
+  /** "none" when the two artifacts agree on the element type; otherwise the cast, derived by comparing two measured TensorSpecs. Never written down twice, and it disappears on its own the day the two artifacts agree. */
   readonly cast:
     | "none"
     | { readonly from: TensorElementType; readonly to: TensorElementType };
@@ -210,7 +211,7 @@ export interface ResolvedModel {
   readonly role: ModelRole;
 }
 
-/** The catalogue resolveRole reads. Substitutable so that phase 8 can A/B a locally re-exported decoder against the shipped one. */
+/** The catalogue resolveRole reads. Substitutable, so the bench can A/B a locally exported artifact against a manifest one. */
 export interface ModelCatalog {
   readonly artifacts: Readonly<Record<ArtifactId, ArtifactRecord>>;
   readonly roles: Readonly<Record<ModelRole, RolePolicy>>;
@@ -221,7 +222,6 @@ const artifactIdFor = (policy: RolePolicy, placement: Placement): ArtifactId =>
     ? policy.onWebgpu.artifact
     : policy.cpu;
 
-/** The decoder does not reach the WebGPU execution provider on any placement, so this never consults the role it feeds. */
 const providerFor = (
   policy: RolePolicy,
   placement: Placement
@@ -286,8 +286,7 @@ function handoffFor(
 }
 
 /**
- * The single place the fp16-on-GPU / fp32-on-CPU arrangement and the decoder's
- * forced stay on WebAssembly are expressed.
+ * The single place the fp16-on-GPU / fp32-on-CPU arrangement is expressed.
  */
 export function resolveRole(
   catalog: ModelCatalog,
@@ -523,6 +522,223 @@ export const ARTIFACTS = {
     sha256: "3e10fd5ae52d0b86792721922fcd954c283a7ed365de7446425bdabe38f3e57d",
     urlPath:
       "3e10fd5ae52d0b86792721922fcd954c283a7ed365de7446425bdabe38f3e57d/decoder_pytorch_model_396-f6feedb42ff90087d898b0941a55d040fa6b2903.onnx",
+  },
+  "decoder-396-web-fp16": {
+    batchDim: null,
+    bytes: 94_133_299,
+    inputs: [
+      { name: "rhythms", shape: [1, 1], type: "int64" },
+      { name: "pitchs", shape: [1, 1], type: "int64" },
+      { name: "lifts", shape: [1, 1], type: "int64" },
+      { name: "articulations", shape: [1, 1], type: "int64" },
+      { name: "slurs", shape: [1, 1], type: "int64" },
+      { name: "context", shape: [1, "cache_exists", 512], type: "float32" },
+      { name: "cache_len", shape: [1], type: "int64" },
+      { name: "cache_in0", shape: [1, 8, "seq_len", 64], type: "float32" },
+      { name: "cache_in1", shape: [1, 8, "seq_len", 64], type: "float32" },
+      { name: "cache_in2", shape: [1, 8, "seq_len", 64], type: "float32" },
+      { name: "cache_in3", shape: [1, 8, "seq_len", 64], type: "float32" },
+      { name: "cache_in4", shape: [1, 8, "seq_len", 64], type: "float32" },
+      { name: "cache_in5", shape: [1, 8, "seq_len", 64], type: "float32" },
+      { name: "cache_in6", shape: [1, 8, "seq_len", 64], type: "float32" },
+      { name: "cache_in7", shape: [1, 8, "seq_len", 64], type: "float32" },
+      { name: "cache_in8", shape: [1, 8, "seq_len", 64], type: "float32" },
+      { name: "cache_in9", shape: [1, 8, "seq_len", 64], type: "float32" },
+      { name: "cache_in10", shape: [1, 8, "seq_len", 64], type: "float32" },
+      { name: "cache_in11", shape: [1, 8, "seq_len", 64], type: "float32" },
+      { name: "cache_in12", shape: [1, 8, "seq_len", 64], type: "float32" },
+      { name: "cache_in13", shape: [1, 8, "seq_len", 64], type: "float32" },
+      { name: "cache_in14", shape: [1, 8, "seq_len", 64], type: "float32" },
+      { name: "cache_in15", shape: [1, 8, "seq_len", 64], type: "float32" },
+      { name: "cache_in16", shape: [1, 8, "seq_len", 64], type: "float32" },
+      { name: "cache_in17", shape: [1, 8, "seq_len", 64], type: "float32" },
+      { name: "cache_in18", shape: [1, 8, "seq_len", 64], type: "float32" },
+      { name: "cache_in19", shape: [1, 8, "seq_len", 64], type: "float32" },
+      { name: "cache_in20", shape: [1, 8, "seq_len", 64], type: "float32" },
+      { name: "cache_in21", shape: [1, 8, "seq_len", 64], type: "float32" },
+      { name: "cache_in22", shape: [1, 8, "seq_len", 64], type: "float32" },
+      { name: "cache_in23", shape: [1, 8, "seq_len", 64], type: "float32" },
+      { name: "cache_in24", shape: [1, 8, "seq_len", 64], type: "float32" },
+      { name: "cache_in25", shape: [1, 8, "seq_len", 64], type: "float32" },
+      { name: "cache_in26", shape: [1, 8, "seq_len", 64], type: "float32" },
+      { name: "cache_in27", shape: [1, 8, "seq_len", 64], type: "float32" },
+      { name: "cache_in28", shape: [1, 8, "seq_len", 64], type: "float32" },
+      { name: "cache_in29", shape: [1, 8, "seq_len", 64], type: "float32" },
+      { name: "cache_in30", shape: [1, 8, "seq_len", 64], type: "float32" },
+      { name: "cache_in31", shape: [1, 8, "seq_len", 64], type: "float32" },
+    ],
+    outputs: [
+      { name: "out_rhythms", shape: [1, 1, 259], type: "float32" },
+      { name: "out_pitchs", shape: [1, 1, 72], type: "float32" },
+      { name: "out_lifts", shape: [1, 1, 7], type: "float32" },
+      { name: "out_positions", shape: [1, 1, 3], type: "float32" },
+      { name: "out_articulations", shape: [1, 1, 54], type: "float32" },
+      { name: "out_slurs", shape: [1, 1, 5], type: "float32" },
+      { name: "attention", shape: [2], type: "float32" },
+      {
+        name: "cache_out0",
+        shape: [1, 8, "Concatcache_out0_dim_2", 64],
+        type: "float32",
+      },
+      {
+        name: "cache_out1",
+        shape: [1, 8, "Concatcache_out1_dim_2", 64],
+        type: "float32",
+      },
+      {
+        name: "cache_out2",
+        shape: [1, 8, "Concatcache_out2_dim_2", 64],
+        type: "float32",
+      },
+      {
+        name: "cache_out3",
+        shape: [1, 8, "Concatcache_out3_dim_2", 64],
+        type: "float32",
+      },
+      {
+        name: "cache_out4",
+        shape: [1, 8, "Concatcache_out4_dim_2", 64],
+        type: "float32",
+      },
+      {
+        name: "cache_out5",
+        shape: [1, 8, "Concatcache_out5_dim_2", 64],
+        type: "float32",
+      },
+      {
+        name: "cache_out6",
+        shape: [1, 8, "Concatcache_out6_dim_2", 64],
+        type: "float32",
+      },
+      {
+        name: "cache_out7",
+        shape: [1, 8, "Concatcache_out7_dim_2", 64],
+        type: "float32",
+      },
+      {
+        name: "cache_out8",
+        shape: [1, 8, "Concatcache_out8_dim_2", 64],
+        type: "float32",
+      },
+      {
+        name: "cache_out9",
+        shape: [1, 8, "Concatcache_out9_dim_2", 64],
+        type: "float32",
+      },
+      {
+        name: "cache_out10",
+        shape: [1, 8, "Concatcache_out10_dim_2", 64],
+        type: "float32",
+      },
+      {
+        name: "cache_out11",
+        shape: [1, 8, "Concatcache_out11_dim_2", 64],
+        type: "float32",
+      },
+      {
+        name: "cache_out12",
+        shape: [1, 8, "Concatcache_out12_dim_2", 64],
+        type: "float32",
+      },
+      {
+        name: "cache_out13",
+        shape: [1, 8, "Concatcache_out13_dim_2", 64],
+        type: "float32",
+      },
+      {
+        name: "cache_out14",
+        shape: [1, 8, "Concatcache_out14_dim_2", 64],
+        type: "float32",
+      },
+      {
+        name: "cache_out15",
+        shape: [1, 8, "Concatcache_out15_dim_2", 64],
+        type: "float32",
+      },
+      {
+        name: "cache_out16",
+        shape: [1, 8, "Concatcache_out16_dim_2", 64],
+        type: "float32",
+      },
+      {
+        name: "cache_out17",
+        shape: [1, 8, "Concatcache_out17_dim_2", 64],
+        type: "float32",
+      },
+      {
+        name: "cache_out18",
+        shape: [1, 8, "Concatcache_out18_dim_2", 64],
+        type: "float32",
+      },
+      {
+        name: "cache_out19",
+        shape: [1, 8, "Concatcache_out19_dim_2", 64],
+        type: "float32",
+      },
+      {
+        name: "cache_out20",
+        shape: [1, 8, "Concatcache_out20_dim_2", 64],
+        type: "float32",
+      },
+      {
+        name: "cache_out21",
+        shape: [1, 8, "Concatcache_out21_dim_2", 64],
+        type: "float32",
+      },
+      {
+        name: "cache_out22",
+        shape: [1, 8, "Concatcache_out22_dim_2", 64],
+        type: "float32",
+      },
+      {
+        name: "cache_out23",
+        shape: [1, 8, "Concatcache_out23_dim_2", 64],
+        type: "float32",
+      },
+      {
+        name: "cache_out24",
+        shape: [1, 8, "Concatcache_out24_dim_2", 64],
+        type: "float32",
+      },
+      {
+        name: "cache_out25",
+        shape: [1, 8, "Concatcache_out25_dim_2", 64],
+        type: "float32",
+      },
+      {
+        name: "cache_out26",
+        shape: [1, 8, "Concatcache_out26_dim_2", 64],
+        type: "float32",
+      },
+      {
+        name: "cache_out27",
+        shape: [1, 8, "Concatcache_out27_dim_2", 64],
+        type: "float32",
+      },
+      {
+        name: "cache_out28",
+        shape: [1, 8, "Concatcache_out28_dim_2", 64],
+        type: "float32",
+      },
+      {
+        name: "cache_out29",
+        shape: [1, 8, "Concatcache_out29_dim_2", 64],
+        type: "float32",
+      },
+      {
+        name: "cache_out30",
+        shape: [1, 8, "Concatcache_out30_dim_2", 64],
+        type: "float32",
+      },
+      {
+        name: "cache_out31",
+        shape: [1, 8, "Concatcache_out31_dim_2", 64],
+        type: "float32",
+      },
+    ],
+    sha256: "253172b02c50883e3f41beb6e842cf707596de8b2f7497a52ed7a01b3f76a27a",
+    urlPath:
+      "253172b02c50883e3f41beb6e842cf707596de8b2f7497a52ed7a01b3f76a27a/decoder_pytorch_model_396-f6feedb42ff90087d898b0941a55d040fa6b2903_web_fp16.onnx",
   },
   "encoder-396-fp16": {
     batchDim: null,

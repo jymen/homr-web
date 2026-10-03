@@ -94,22 +94,30 @@ describe("resolveRole", () => {
     expect(planOn("encoder", GPU).artifactId).toBe("encoder-396-fp16");
   });
 
-  it("keeps the decoder on wasm fp32 whatever the placement asks for", () => {
-    for (const placement of [CPU, GPU, FP16_ON_WASM]) {
-      const plan = planOn("decoder", placement);
-      expect(plan.artifactId).toBe("decoder-396-fp32");
-      expect(plan.provider).toBe("wasm");
+  it("takes the re-exported decoder on webgpu and the shipped one everywhere else", () => {
+    expect(planOn("decoder", GPU)).toMatchObject({
+      artifactId: "decoder-396-web-fp16",
+      provider: "webgpu",
+      reason: "decoder-396-web-fp16 on the webgpu EP",
+    });
+    for (const placement of [CPU, THREADS]) {
+      expect(planOn("decoder", placement).artifactId).toBe("decoder-396-fp32");
     }
-    expect(planOn("decoder", GPU).reason).toContain(
-      "although WebGPU is available: the shipped decoder has no SkipLayerNormalization kernel"
-    );
   });
 
-  it("refuses the encoder's gpu-buffer request while the decoder is on wasm", () => {
-    expect(DEFAULT_CATALOG.roles.encoder.onWebgpu).toMatchObject({
-      keepOutputsOnGpu: ["output"],
-    });
-    expect(planOn("encoder", GPU).outputsOnGpu).toEqual([]);
+  it("gives both decoders one tensor contract", () => {
+    const contract = (placement: Placement) => {
+      const { artifact } = planOn("decoder", placement);
+      return [...artifact.inputs, ...artifact.outputs].map(
+        (spec) => `${spec.name}:${spec.type}`
+      );
+    };
+    expect(contract(GPU)).toEqual(contract(CPU));
+  });
+
+  it("grants the encoder's gpu-buffer request once the decoder is on webgpu too", () => {
+    expect(planOn("encoder", GPU).outputsOnGpu).toEqual(["output"]);
+    expect(planOn("encoder", FP16_ON_WASM).outputsOnGpu).toEqual([]);
   });
 
   it("leaves segnet's logits on the cpu for the argmax", () => {
@@ -126,7 +134,7 @@ describe("resolveRole", () => {
     expect(planOn("encoder", GPU).handoff).toEqual({
       cast: { from: "float16", to: "float32" },
       input: "context",
-      location: "cpu",
+      location: "gpu-buffer",
       to: "decoder",
     });
   });
