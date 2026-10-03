@@ -185,8 +185,6 @@ function warpTriangle(
   if (matrix === null || rows.stop === rows.start || cols.stop === cols.start) {
     return null;
   }
-  // A clone, because cv2 receives the numpy slice as a Mat with no parent,
-  // and an opencv.js roi still knows the image around it.
   const view = scope.keep(
     source.roi(
       new cv.Rect(
@@ -199,7 +197,7 @@ function warpTriangle(
   );
   const warped = scope.keep(new cv.Mat());
   cv.warpAffine(
-    scope.keep(view.clone()),
+    view,
     warped,
     scope.keep(cv.matFromArray(2, 3, cv.CV_64F, [...matrix])),
     new cv.Size(toRect.width, toRect.height),
