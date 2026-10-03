@@ -1,8 +1,8 @@
 // Regenerates src/models/manifest.ts's ARTIFACTS block and decoder tensor-name
-// tuples from the nine files in models/: eight from tools/fetch-models.sh, one from
-// tools/export-decoder.py. Every
-// value it writes is a fact about a file: the SHA-256, the byte length, and the
-// input/output names, shapes and element types read from the opened session.
+// tuples from the nine files in models/, eight from tools/fetch-models.sh and
+// one from tools/export-decoder.py. Every value it writes is a fact about a
+// file: the SHA-256, the byte length, and the input/output names, shapes and
+// element types read from the opened session.
 // Nothing it writes is a judgement; MODEL_ROLES and resolveRole are
 // hand-written above the markers and this tool never touches them.
 //

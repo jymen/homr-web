@@ -122,7 +122,9 @@ export const MODEL_ROLES = {
       // 77 to 85 ms a step with the caches left on the GPU, 130 ms without,
       // against 22 ms on four wasm threads in the same Chrome session
       // (docs/decisions.tsv, phase 8).
-      // WEBGPU_DECODER_CATALOG keeps that placement measurable.
+      // WEBGPU_DECODER_CATALOG keeps that placement measurable. The wasm path
+      // keeps fp32 for homr's reason: "the fp16 model ... is slower than the
+      // fp32 model on the CPU EP" (homr/onnx_providers.py:1-16).
       why: "the decoder is 3 to 4 times slower a step on the WebGPU EP than on wasm threads",
     },
   },
