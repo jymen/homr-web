@@ -9,41 +9,20 @@
  * recorded in `src/models/manifest.ts`'s comment does not reproduce and should be
  * read as unverified.
  *
- * So the whole page goes through segnet exactly once by default, in the golden
- * test, and everything else runs on a 1920x320 band of the fixture: six tiles
- * instead of 54. `resize_image` is a no-op at exactly the target width, so a
- * 1920-wide band reaches segnet at its own height, and anything *narrower* is
- * upscaled to 1920 and costs more tiles rather than fewer. Six is the floor for
- * any page that goes through preprocess.
+ * So the whole page goes through segnet once by default, in the golden test,
+ * from the Python preprocessed page; the port's own preprocess feeds it in
+ * test/recognize-golden.test.ts.
  */
 
-import {
-  MessageChannel,
-  type MessagePort as NodeMessagePort,
-} from "node:worker_threads";
 import { describe, expect, it } from "vitest";
-import {
-  cropPlane,
-  planeAgreement,
-  planeFromBytes,
-} from "../src/image/plane.js";
+import { planeAgreement } from "../src/image/plane.js";
 import {
   MASK_CLASS_NAMES,
   type SegmentationMasks,
 } from "../src/model/pipeline.js";
-import { memoryCache } from "../src/models/cache.js";
-import { ModelError } from "../src/models/errors.js";
 import { segmentPage } from "../src/segmentation/segment.js";
 import { tileGrid } from "../src/segmentation/tiles.js";
 import {
-  type SegmentationPort,
-  SegmentationWorker,
-  type SegmentationWorkerOptions,
-  serveSegmentation,
-  type WorkerEvent,
-} from "../src/segmentation/worker.js";
-import {
-  fixtureImageOf,
   type GoldenFixture,
   goldenPageOf,
   listGoldenFixtures,
@@ -52,27 +31,15 @@ import {
   CPU,
   describeWithModels,
   FP16_ON_WASM,
-  localModels,
   required,
   storeOn,
 } from "./support/models.js";
-import { nodeOpenCvSource } from "./support/opencv.js";
 
 /** homr's own batch_size, and what the segnet sessions below are opened with. */
 const BATCH = 8;
 /** testing.md's mask criterion, per class. */
 const MASK_AGREEMENT = 0.999;
 const PAGE_TIMEOUT_MS = 600_000;
-/** Six tiles at 2 s each, plus the session open, plus preprocess. Comfortably inside this and nowhere near the shared 30 s budget. */
-const BAND_TIMEOUT_MS = 180_000;
-/** A 1920-wide band of the fixture, in the *source* page's coordinates: two rows of ink from the middle of the Kesh page. */
-const BAND = { bottom: 1520, left: 280, right: 2200, top: 1200 } as const;
-const BAND_WIDTH = BAND.right - BAND.left;
-const BAND_HEIGHT = BAND.bottom - BAND.top;
-/** A contested band proves the wiring; a blank one would agree with anything. */
-const MIN_CLASSES = 2;
-const IS_CLOSED = /is closed/;
-
 /** Straight to stdout rather than through vitest's per-test console buffer, so the figures appear in the order they were measured. */
 const report = (line: string): void => {
   process.stdout.write(`${line}\n`);
@@ -80,27 +47,6 @@ const report = (line: string): void => {
 
 const firstFixture = (): GoldenFixture =>
   required(listGoldenFixtures()[0], "a golden fixture to segment");
-
-const bandOf = (fixture: GoldenFixture) =>
-  cropPlane(
-    fixtureImageOf(fixture),
-    BAND.left,
-    BAND.top,
-    BAND.right,
-    BAND.bottom
-  );
-
-const workerOn = (
-  extra: Partial<SegmentationWorkerOptions> = {}
-): SegmentationWorker =>
-  new SegmentationWorker({
-    baseUrl: "file:///models/",
-    cache: memoryCache(),
-    fetchBytes: localModels(),
-    maxBackend: "wasm",
-    openCv: nodeOpenCvSource(),
-    ...extra,
-  });
 
 /**
  * Every per-class agreement printed before any of them is asserted, so the five
@@ -159,233 +105,6 @@ describeWithModels("segnet over the whole golden page", () => {
     },
     PAGE_TIMEOUT_MS
   );
-});
-
-describeWithModels("the segmentation Worker", () => {
-  it(
-    "preprocesses and segments a BGR page, reporting both costs",
-    async () => {
-      const band = bandOf(firstFixture());
-      expect(`${band.width}x${band.height}`).toBe(
-        `${BAND_WIDTH}x${BAND_HEIGHT}`
-      );
-      const progress: string[] = [];
-      const worker = workerOn({
-        onProgress: (done, total) => {
-          progress.push(`${done}/${total}`);
-        },
-      });
-      try {
-        const started = await worker.start();
-        // Identity, not equality: an equal-but-new report is what a second open
-        // would produce, which is the thing being ruled out.
-        expect(await worker.start()).toBe(started);
-        report(
-          `worker: ${started.backend}, ${started.numThreads} thread(s), batch ${started.batch}, ${started.modelReason}`
-        );
-        report(`worker runtime reason: ${started.reason}`);
-
-        const page = await worker.segment(band);
-        report(
-          `worker band ${page.result.width}x${page.result.height}: preprocess ${Math.round(page.preprocessMs)} ms, segment ${Math.round(page.segmentMs)} ms`
-        );
-
-        expect(page.result.width).toBe(BAND_WIDTH);
-        expect(page.result.height).toBe(BAND_HEIGHT);
-        for (const name of MASK_CLASS_NAMES) {
-          expect(`${name} ${page.result.masks[name].width}`).toBe(
-            `${name} ${BAND_WIDTH}`
-          );
-          expect(`${name} ${page.result.masks[name].height}`).toBe(
-            `${name} ${BAND_HEIGHT}`
-          );
-        }
-        expect(new Set(page.result.classes.data).size).toBeGreaterThanOrEqual(
-          MIN_CLASSES
-        );
-        expect(page.preprocessMs).toBeGreaterThan(0);
-        expect(page.segmentMs).toBeGreaterThan(0);
-        expect(page.durationMs).toBeGreaterThanOrEqual(page.segmentMs);
-        // The width and height assertions above are what make the band's own
-        // dimensions the right input here: they prove autocrop left it alone.
-        const bandTiles = tileGrid(BAND_WIDTH, BAND_HEIGHT).length;
-        expect(progress.at(-1)).toBe(`${bandTiles}/${bandTiles}`);
-      } finally {
-        await worker.close();
-      }
-    },
-    BAND_TIMEOUT_MS
-  );
-});
-
-/**
- * The browser half of the transport, proved at compile time because nothing on
- * Node exercises it: a worker script's `serveSegmentation(self, worker)` and a
- * page's `serveSegmentation(channel.port1, worker)` both have to type-check.
- *
- * It is not a formality. A `DedicatedWorkerGlobalScope` was *not* assignable to
- * `SegmentationPort` while its `postMessage` took an optional transfer list,
- * because the DOM's two-argument overload declares `transfer: Transferable[]`
- * with no `undefined` in it, while `@types/node`'s takes `transferList?`. So the
- * Node tests below passed green over a browser entry that could not compile, and
- * these two lines are what caught it.
- */
-type FitsPort<T> = T extends SegmentationPort ? true : false;
-const BROWSER_PORTS_FIT: [
-  FitsPort<DedicatedWorkerGlobalScope>,
-  FitsPort<MessagePort>,
-] = [true, true];
-
-/** A `model` or `progress` event: a notification about the worker rather than a reply to one command, so it carries no correlation id. */
-const isNotification = (data: unknown): boolean =>
-  typeof data === "object" &&
-  data !== null &&
-  "kind" in data &&
-  (data.kind === "model" || data.kind === "progress");
-
-/**
- * The next *reply* on this port, collecting into `seen` every notification it
- * steps over. Node's `once` hands the deserialized value straight over, so there
- * is nothing to narrow that the assertions do not narrow.
- *
- * The skipping is not tidiness. Notifications carry no id, so a reply assertion
- * that did not step over them would read whichever arrived first, and the store's
- * `opened` event arrives in the middle of `start`. Collecting them here is also
- * the only coverage the notification arms of `WorkerEvent` get.
- */
-function nextReply(port: NodeMessagePort, seen: unknown[]): Promise<unknown> {
-  return new Promise((resolve) => {
-    const take = (data: unknown): void => {
-      if (isNotification(data)) {
-        seen.push(data);
-        port.once("message", take);
-        return;
-      }
-      resolve(data);
-    };
-    port.once("message", take);
-  });
-}
-
-describeWithModels("the segmentation transport", () => {
-  it(
-    "answers each command with its own id, and names one it cannot serve",
-    async () => {
-      const band = bandOf(firstFixture());
-      const { port1, port2 } = new MessageChannel();
-      const notified: unknown[] = [];
-      const worker = workerOn({
-        onEvent: (event) => {
-          port2.postMessage({ event, kind: "model" } satisfies WorkerEvent, []);
-        },
-      });
-      const detach = serveSegmentation(port2, worker);
-      try {
-        port1.postMessage({ id: 7, kind: "start" });
-        expect(await nextReply(port1, notified)).toMatchObject({
-          id: 7,
-          kind: "started",
-        });
-        // The store's own events reached the port as notifications while the start
-        // was in flight, which is what the `model` arm exists for.
-        expect(notified.length).toBeGreaterThan(0);
-        expect(notified).toContainEqual(
-          expect.objectContaining({ kind: "model" })
-        );
-
-        port1.postMessage({ id: 8, kind: "segment", page: band });
-        expect(await nextReply(port1, notified)).toMatchObject({
-          id: 8,
-          kind: "segmented",
-          page: {
-            result: {
-              height: BAND_HEIGHT,
-              masks: { staff: { height: BAND_HEIGHT, width: BAND_WIDTH } },
-              width: BAND_WIDTH,
-            },
-          },
-        });
-
-        port1.postMessage({ id: 9, kind: "enhance" });
-        expect(await nextReply(port1, notified)).toEqual({
-          error: 'a segmentation worker cannot serve the command "enhance"',
-          id: 9,
-          kind: "failed",
-        });
-
-        port1.postMessage({ id: 10, kind: "segment", page: "a jpeg" });
-        expect(await nextReply(port1, notified)).toEqual({
-          error:
-            "a segmentation worker cannot serve a segment command whose page is not a BGR image",
-          id: 10,
-          kind: "failed",
-        });
-
-        port1.postMessage({ kind: "start" });
-        expect(await nextReply(port1, notified)).toEqual({
-          error:
-            "a segmentation worker cannot serve a message with no integer id (members: kind)",
-          id: null,
-          kind: "failed",
-        });
-
-        port1.postMessage({ id: 11, kind: "close" });
-        expect(await nextReply(port1, notified)).toEqual({
-          id: 11,
-          kind: "closed",
-        });
-      } finally {
-        detach();
-        await worker.close();
-        port1.close();
-        port2.close();
-      }
-    },
-    BAND_TIMEOUT_MS
-  );
-});
-
-describe("the transport's port type", () => {
-  it("is satisfied by a browser worker global and a browser MessagePort", () => {
-    // The work is the annotation above; this keeps the constant read and says so.
-    expect(BROWSER_PORTS_FIT).toEqual([true, true]);
-  });
-});
-
-describeWithModels("closing the segmentation Worker", () => {
-  it("refuses the start it was closed during", async () => {
-    const worker = workerOn();
-    const starting = worker.start();
-    const closing = worker.close();
-    // Whichever of the runtime, the store and the download the close landed in,
-    // the open is refused rather than left to finish into a worker nobody holds.
-    await expect(starting).rejects.toThrow(ModelError);
-    await expect(closing).resolves.toBeUndefined();
-  });
-
-  it("answers two concurrent closes and stays closed", async () => {
-    const worker = workerOn();
-    await worker.start();
-    // Both must resolve. Before `#closing` held the one shutdown, the second call
-    // saw the closed flag and returned while the first was still releasing.
-    await expect(
-      Promise.all([worker.close(), worker.close()])
-    ).resolves.toEqual([undefined, undefined]);
-    await expect(worker.start()).rejects.toThrow(IS_CLOSED);
-  });
-});
-
-describe("a closed segmentation Worker", () => {
-  const onePixelPage = () =>
-    planeFromBytes("bgr", 1, 1, new Uint8Array([255, 255, 255]));
-
-  it("closes twice without complaint, and then opens and segments nothing", async () => {
-    const worker = workerOn();
-    await worker.close();
-    await worker.close();
-    await expect(worker.start()).rejects.toThrow(ModelError);
-    await expect(worker.segment(onePixelPage())).rejects.toThrow(IS_CLOSED);
-  });
 });
 
 /**

@@ -37,6 +37,13 @@ import {
 const SEGNET_INPUT_NAME = "input";
 const SEGNET_OUTPUT_NAME = "output";
 
+/**
+ * homr's own `extract(batch_size=8)`. A bigger batch trades 1.2 MB of wasm
+ * arena per extra tile against one fewer round trip, and only a measurement
+ * says where that turns.
+ */
+export const DEFAULT_SEGNET_BATCH = 8;
+
 export interface SegmentOptions {
   /** Tiles per session call. The session must have been opened with the same value, because freeDimensionOverrides pins the dimension. */
   readonly batch: number;

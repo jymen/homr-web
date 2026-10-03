@@ -78,25 +78,43 @@ export function joinVoice(
   return removeDuplicatedSymbols(voice);
 }
 
+export interface ParseStaffsOptions extends DecodeOptions {
+  /** After each staff's canvas ("dewarp") and after its tokens ("staff"), with the staffs done and the page's count. */
+  readonly onStaff?: (
+    stage: "dewarp" | "staff",
+    done: number,
+    total: number
+  ) => void;
+}
+
 /** parse_staffs: one symbol list per voice, staffs parsed one at a time in homr's order. */
 export async function parseStaffs(
   cv: OpenCv,
   sessions: TransformerSessions,
   multiStaffs: readonly MultiStaff[],
   page: GrayImage,
-  options: DecodeOptions = {}
+  options: ParseStaffsOptions = {}
 ): Promise<EncodedSymbol[][]> {
   const systems = ensureSameNumberOfStaffs(multiStaffs, page.height);
   const regions = staffRegions(systems);
+  const voiceCount = systems[0]?.staffs.length ?? 0;
+  const total = systems.reduce(
+    (sum, system) => sum + Math.min(system.staffs.length, voiceCount),
+    0
+  );
+  let done = 0;
   const voices: EncodedSymbol[][] = [];
-  for (let voice = 0; voice < (systems[0]?.staffs.length ?? 0); voice += 1) {
+  for (let voice = 0; voice < voiceCount; voice += 1) {
     const staffs: DecodedSymbol[][] = [];
     for (const system of systems) {
       const staff = system.staffs[voice];
       if (staff !== undefined) {
         const canvas = prepareStaffImage(cv, staff, page, regions);
+        options.onStaff?.("dewarp", done + 1, total);
         // biome-ignore lint/performance/noAwaitInLoops: one staff at a time, as homr does; the sessions share one WebAssembly arena
         staffs.push(await parseStaffCanvas(sessions, canvas, options));
+        done += 1;
+        options.onStaff?.("staff", done, total);
       }
     }
     voices.push(joinVoice(staffs));

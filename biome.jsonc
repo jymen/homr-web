@@ -111,8 +111,8 @@
       }
     },
     {
-      // A library needs one entry point that re-exports its modules.
-      "includes": ["src/index.ts"],
+      // The public entry re-exports the API, and homr-web/internal every module.
+      "includes": ["src/index.ts", "src/internal.ts"],
       "linter": {
         "rules": {
           "performance": { "noBarrelFile": "off", "noReExportAll": "off" }
