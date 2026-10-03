@@ -1,7 +1,7 @@
 /**
  * Port of the staff half of homr's model.py: StaffPoint, Staff, MultiStaff,
- * with their methods as free functions. transform_coordinates and
- * extend_to_x_range belong to the dewarp and are not here yet.
+ * with their methods as free functions. extend_to_x_range has no caller in
+ * 0.7.0's inference path and is not ported.
  *
  * homr computes several fields in constructors from other fields
  * (Staff.min_x from the grid, average_unit_size as a median). They are
@@ -42,7 +42,7 @@ import {
   STAFF_POSITION_TOLERANCE,
 } from "./constants.js";
 import { DetectionError } from "./pipeline.js";
-import type { SymbolOnStaff } from "./symbols.js";
+import { type SymbolOnStaff, transformSymbol } from "./symbols.js";
 
 /** A staff or multi-staff that cannot exist. Named for what it is about, as PlaneError, GoldenError and VocabularyError are; phase 2's src/models/ owns the separate ModelError. */
 export class StaffError extends Error {}
@@ -394,4 +394,30 @@ export function mergeMultiStaffs(
     }
   }
   return createMultiStaff(staffs, connections);
+}
+
+/**
+ * Staff.transform_coordinates: every line ordinate and every symbol centre
+ * mapped through `map`. A point's x becomes the mean of its mapped x values,
+ * as StaffPoint.transform_coordinates does, and the unit sizes are
+ * recomputed by the factories.
+ */
+export function transformStaffCoordinates(
+  staff: Staff,
+  map: (p: Point) => Point,
+  space: CoordinateSpace
+): Staff {
+  const grid = staff.grid.map((point) => {
+    const mapped = point.y.map((y) => map({ x: point.x, y }));
+    return createStaffPoint(
+      mean(mapped.map((p) => p.x)),
+      mapped.map((p) => p.y),
+      point.angle
+    );
+  });
+  return createStaff(grid, {
+    isGrandstaff: staff.isGrandstaff,
+    space,
+    symbols: staff.symbols.map((symbol) => transformSymbol(symbol, map)),
+  });
 }

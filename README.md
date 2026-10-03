@@ -7,7 +7,8 @@ and no server is involved: the segmentation and transformer models run on
 the musician's own machine through onnxruntime-web, on WebGPU where the
 browser has it and on WebAssembly elsewhere.
 
-**Status: phase 5, detection.** A page goes from pixels to homr's staffs. It
+**Status: phase 6, staff canvases.** A page goes from pixels to homr's staffs,
+and each staff to the 1280 by 256 canvas the transformer reads. It
 passes through autocrop, PIL's bicubic resize and CLAHE to byte-identical
 output, is tiled the way homr tiles it, and comes back out of the segmentation
 model as the five masks, which agree with homr's own pixel for pixel on the
@@ -24,6 +25,17 @@ piano page, because the native arm64 build uses a fused multiply-add that
 WebAssembly does not have (`docs/design/phase-5-minarearect.md`). And
 noteheads whose centres are one float32 step apart in height can come out in
 another order. The notes found, their positions and the staffs are the same.
+
+`staffCanvases` cuts each staff out of the page, dewarps it with homr's
+piecewise affine transform and centres it on the encoder canvas. On both
+public pages its canvases differ from homr's by a mean of 0.009 to 0.022 gray
+levels, nearly all of it cv2.resize: the arm64 build of OpenCV resizes through
+the KleidiCV HAL, which lands up to two levels from the opencv.js result.
+opencv.js has no `Subdiv2D`, so the triangulation is delaunator over the same
+three outer vertices Subdiv2D adds; given homr's own input, the warp is exact
+on seven of the eight canvases and three pixels off on the eighth. Both public
+pages are typeset and nearly flat; a photograph is the case the dewarp exists
+for, and no photograph is among the public fixtures.
 
 Underneath that: phase 1's data model (planes, rotated boxes with homr's angle
 normalisation, staffs and symbols, the six decoder vocabularies, and the
@@ -69,6 +81,8 @@ src/geometry/     boxes.ts (PointList, RotatedRect, RotatedBox, Ellipse, AxisBox
 src/model/        staff.ts, symbols.ts, pipeline.ts, constants.ts (model.py's data, the stage contracts)
 src/models/       manifest.ts (generated), backend.ts (the runtime probe), store.ts, cache.ts, session.ts, dtype.ts (the fp16 codec)
 src/cv/           opencv.ts (the loader and Mat lifetime), default-source.ts (opencv.js in its own chunk)
+src/dewarp/       delaunay.ts (Subdiv2D's triangulation over delaunator), piecewise-affine.ts, staff.ts (the control points)
+src/pipeline/     detect.ts (masks to multi staffs), staff-image.ts (multi staffs to canvases), staff-positions.ts
 src/segmentation/ preprocess.ts (autocrop, resize, CLAHE), resize.ts (PIL's bicubic in fixed point), tiles.ts (the grid and the merge), segment.ts, worker.ts
 src/transformer/  vocabulary.ts (generated tables), symbol.ts (EncodedSymbol)
 src/golden/       decode.ts (Python dump to domain types, with derivation checks), page.ts (one fixture behind one object)

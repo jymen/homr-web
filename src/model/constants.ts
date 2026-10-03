@@ -60,6 +60,11 @@ export function barLineMinHeight(unitSize: number): number {
   return 3 * unitSize;
 }
 
+/** constants.black_spot_removal_threshold: the smallest dark blob at a canvas edge that the canvas clean-up whitens. */
+export function blackSpotRemovalThreshold(unitSize: number): number {
+  return 2 * unitSize;
+}
+
 /** constants.staff_line_segment_x_tolerance: StaffLineSegment.get_at accepts an x this far outside a fragment. */
 export const STAFF_LINE_SEGMENT_X_TOLERANCE = 10;
 

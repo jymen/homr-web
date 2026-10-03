@@ -191,10 +191,12 @@ export interface PageDetection {
 export const ENCODER_CANVAS = { height: 256, width: 1280 } as const;
 
 /**
- * Phase 6's output per staff: the dewarped, centred gray canvas and the
- * same staff with its grid and symbol centres mapped into canvas
- * coordinates (canvas-<n>-staff.json, `space: "canvas"`). The image is
- * always ENCODER_CANVAS-sized; the factory asserts both.
+ * Phase 6's output per staff: the dewarped, centred gray canvas, and the
+ * staff prepare_staff_image returns (canvas-<n>-staff.json, `space:
+ * "canvas"`). That staff is homr's: moved and scaled into the first crop,
+ * neither dewarped nor moved into the canvas itself, which is a second crop
+ * resized again. The image is always ENCODER_CANVAS-sized; the factory
+ * asserts both.
  */
 export interface StaffCanvas {
   readonly image: GrayImage;
