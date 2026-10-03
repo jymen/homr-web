@@ -134,6 +134,15 @@
       margin-top: 8px;
       border: 1px solid var(--line);
     }
+    #canvases canvas {
+      display: block;
+      width: 100%;
+      max-width: 1280px;
+      border: 1px solid var(--line);
+    }
+    #canvases figure {
+      margin: 12px 0;
+    }
     .key span {
       margin-right: 16px;
     }
@@ -149,7 +158,9 @@
     {
       "imports": {
         "@techstark/opencv-js": "/bench/opencv-esm.js",
-        "onnxruntime-web": "/node_modules/onnxruntime-web/dist/ort.bundle.min.mjs"
+        "delaunator": "/node_modules/delaunator/index.js",
+        "onnxruntime-web": "/node_modules/onnxruntime-web/dist/ort.bundle.min.mjs",
+        "robust-predicates": "/node_modules/robust-predicates/index.js"
       }
     }
     </script>
@@ -160,7 +171,8 @@
       One page of sheet music through preprocess, segnet and staff detection, at
       batch 8, 16 and 32. Press Run once for the cold numbers and again for the
       warm ones: the second press must download zero model bytes. The staffs
-      found are drawn over the page at the bottom.
+      found are drawn over the page, and each staff's encoder canvas is shown
+      above homr's.
     </p>
 
     <section>
@@ -247,6 +259,11 @@
         <span style="color: #ffb000">connection</span>
       </p>
       <canvas height="0" id="overlay" width="0"></canvas>
+    </section>
+
+    <section>
+      <h2>Staff canvases</h2>
+      <div id="canvases"></div>
     </section>
 
     <script src="./bench.js" type="module"></script>

@@ -20,6 +20,11 @@
  * line drawn comes from `staff.grid`: if the lines sit on the printed ones,
  * the whole chain agrees with the page.
  *
+ * After the last run, staffCanvases turns that run's multi staffs into the
+ * encoder canvases, and each is drawn above homr's canvas-<n>.png with their
+ * mean absolute difference. Detection here ran on the browser's own masks, so
+ * a difference includes anything detection did differently.
+ *
  * This is also the first exercise of the default opencv.js path: the Node tests
  * inject a createRequire source because the dynamic import hangs under vitest,
  * so `preprocessPage(image)` is called with no `cv` argument on purpose, and the
@@ -38,6 +43,7 @@ import {
   createInputPredictions,
   DetectionError,
   detectStaffsInImage,
+  ensureSameNumberOfStaffs,
   loadOpenCv,
   MASK_CLASS_NAMES,
   ModelError,
@@ -46,6 +52,9 @@ import {
   preprocessPage,
   rgbaFromPlane,
   segmentPage,
+  staffCanvases,
+  staffRegion,
+  staffRegions,
   startRuntime,
 } from "../dist/index.js";
 
@@ -77,6 +86,7 @@ const OVERLAY = {
 
 const ui = {
   backend: document.querySelectorAll('input[name="backend"]'),
+  canvases: document.querySelector("#canvases"),
   detection: document.querySelector("#detection"),
   empty: document.querySelector("#empty"),
   fixture: document.querySelectorAll('input[name="fixture"]'),
@@ -322,6 +332,7 @@ async function measure(batch, cv) {
     const bytes = byteCounts(events);
     return {
       detected,
+      page,
       result,
       run: {
         backend: runtime.backend,
@@ -491,6 +502,90 @@ function logAgreement(batch, classes) {
   );
 }
 
+/** A grayscale PNG's samples, decoded without colour conversion; channel 0 is the gray. */
+async function fetchGray(url) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`${url} answered ${response.status}`);
+  }
+  const bitmap = await createImageBitmap(await response.blob(), {
+    colorSpaceConversion: "none",
+    premultiplyAlpha: "none",
+  });
+  const { height, width } = bitmap;
+  const context = new OffscreenCanvas(width, height).getContext("2d");
+  context.drawImage(bitmap, 0, 0);
+  bitmap.close();
+  const rgba = context.getImageData(0, 0, width, height).data;
+  const data = new Uint8Array(width * height);
+  for (let i = 0; i < data.length; i += 1) {
+    data[i] = rgba[i * 4];
+  }
+  return { data, height, width };
+}
+
+function drawGray(gray) {
+  const element = document.createElement("canvas");
+  element.width = gray.width;
+  element.height = gray.height;
+  const rgba = new Uint8ClampedArray(gray.width * gray.height * 4);
+  gray.data.forEach((value, i) => {
+    rgba.set([value, value, value, 255], i * 4);
+  });
+  element.getContext("2d").putImageData(new ImageData(rgba, gray.width), 0, 0);
+  return element;
+}
+
+function meanAbsoluteDifference(a, b) {
+  if (a.width !== b.width || a.height !== b.height) {
+    return Number.POSITIVE_INFINITY;
+  }
+  let total = 0;
+  for (let i = 0; i < a.data.length; i += 1) {
+    total += Math.abs(a.data[i] - b.data[i]);
+  }
+  return total / a.data.length;
+}
+
+async function showCanvases(cv, detected, page) {
+  ui.canvases.replaceChildren();
+  if (detected.failure !== undefined) {
+    return;
+  }
+  const startedAt = performance.now();
+  const canvases = staffCanvases(
+    cv,
+    detected.detection.multiStaffs,
+    page.preprocessed
+  );
+  log(
+    `  staff canvases: ${canvases.length} in ${ms(performance.now() - startedAt)}`
+  );
+  const systems = ensureSameNumberOfStaffs(
+    detected.detection.multiStaffs,
+    page.preprocessed.height
+  );
+  const regions = staffRegions(systems);
+  // staffCanvases' order: every system's first staff, then every second staff.
+  const staffs = (systems[0]?.staffs ?? []).flatMap((_, voice) =>
+    systems.map((system) => system.staffs[voice])
+  );
+  for (const [n, canvas] of canvases.entries()) {
+    const base = `/test/golden/${requestedFixture()}`;
+    const golden = await fetchGray(`${base}/canvas-${n}.png`);
+    const dewarp = await (await fetch(`${base}/dewarp-${n}.json`)).json();
+    const difference = meanAbsoluteDifference(canvas.image, golden);
+    log(
+      `  canvas ${n}: mean absolute difference from homr's ${difference.toFixed(4)}, region ${staffRegion(staffs[n], regions).join(",")} where homr's is ${dewarp.region.join(",")}`
+    );
+    const figure = document.createElement("figure");
+    const caption = document.createElement("figcaption");
+    caption.textContent = `canvas ${n}: this port above, homr below, mean absolute difference ${difference.toFixed(4)}`;
+    figure.append(caption, drawGray(canvas.image), drawGray(golden));
+    ui.canvases.append(figure);
+  }
+}
+
 async function runAll() {
   ui.run.disabled = true;
   try {
@@ -504,9 +599,11 @@ async function runAll() {
     const cv = await loadOpenCv();
     log(`opencv.js ready in ${ms(performance.now() - openCvAt)}`);
 
+    let last;
     for (const batch of BATCHES) {
       log(`batch ${batch}: running`);
-      const { detected, result, run } = await measure(batch, cv);
+      const { detected, page, result, run } = await measure(batch, cv);
+      last = { detected, page };
       runs.push(run);
       renderRuns();
       log(
@@ -519,6 +616,7 @@ async function runAll() {
       logAgreement(batch, result.classes);
       showDetection(detected);
     }
+    await showCanvases(cv, last.detected, last.page);
     log("done");
   } catch (error) {
     if (error instanceof ModelError) {
