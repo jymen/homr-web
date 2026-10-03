@@ -17,7 +17,11 @@ import {
   encoderInput,
   NORMALIZED_FLOAT32,
 } from "../src/transformer/normalize.js";
-import { removeDuplicatedSymbols } from "../src/transformer/remove-duplicated-symbols.js";
+import {
+  durationOfMeasure,
+  removeDuplicatedSymbols,
+  typicalDurationOfMeasures,
+} from "../src/transformer/remove-duplicated-symbols.js";
 import {
   createEncodedSymbol,
   type DecodedSymbol,
@@ -101,6 +105,24 @@ describe("remove_duplicated_symbols against Python", () => {
     }
   });
 
+  it("_get_duration_of_measure and _get_typical_duration_of_measures", () => {
+    const measureOf = (value: unknown, at: string) =>
+      (Array.isArray(value) ? value : []).map((chord, i) =>
+        symbolRows(chord, `${at}[${i}]`).map(symbolOf)
+      );
+    for (const one of cases("measure")) {
+      const d = durationOfMeasure(measureOf(one.measure, "measure"));
+      expect([d.num, d.den], String(one.name)).toEqual(one.result);
+    }
+    for (const one of cases("typical")) {
+      const measures = (Array.isArray(one.measures) ? one.measures : []).map(
+        (m, i) => measureOf(m, `measures[${i}]`)
+      );
+      const d = typicalDurationOfMeasures(measures);
+      expect([d.num, d.den], String(one.name)).toEqual(one.result);
+    }
+  });
+
   it("prior_power_of_two", () => {
     for (const one of cases("priorPowerOfTwo")) {
       expect(priorPowerOfTwo(Number(one.n)), String(one.n)).toBe(one.result);
@@ -127,14 +149,17 @@ describe("ConvertToArray against Python", () => {
   ] as const)(
     "encoderInput writes a %s [1, 1, 256, 1280] tensor pixel by pixel",
     async (type, key) => {
-      const canvas = createGray(1280, 256, 255);
-      canvas.data[1281] = 0;
+      const canvas = createGray(1280, 256);
+      for (let i = 0; i < canvas.data.length; i += 1) {
+        canvas.data[i] = (i * 7) % 256;
+      }
       const tensor = encoderInput(canvas, type);
       expect(tensor.dims).toEqual([1, 1, 256, 1280]);
       expect(tensor.type).toBe(type);
-      const data = await tensor.getData();
-      expect(data[1281]).toBe(rows.at(0)?.[key]);
-      expect(data[0]).toBe(rows.at(255)?.[key]);
+      const want = rows.map((one) => one[key]);
+      expect([...(await tensor.getData())]).toEqual(
+        [...canvas.data].map((pixel) => want[pixel])
+      );
     }
   );
 });
@@ -177,5 +202,18 @@ describe("predict_best's position filter", () => {
 
   it("keeps everything on a grand staff", () => {
     expect(filterPositions(symbols, true)).toEqual(symbols);
+  });
+});
+
+describe("parse_staffs skips an empty staff", () => {
+  it("adds no newline for it", () => {
+    const note = createEncodedSymbol("note_4", {
+      pitch: "C4",
+      position: "upper",
+    });
+    expect(joinVoice([[], [note], []]).map((s) => s.rhythm)).toEqual([
+      "note_4",
+      "newline",
+    ]);
   });
 });

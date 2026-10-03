@@ -661,9 +661,14 @@ const VECTOR_CHECKS: Record<VectorFile, VectorCheck> = {
   "vocabulary-cleanup": {
     check: (one, at) => {
       need(
-        ["duration", "priorPowerOfTwo", "remove", "tuplet"].includes(
-          String(one.kind)
-        ),
+        [
+          "duration",
+          "measure",
+          "priorPowerOfTwo",
+          "remove",
+          "tuplet",
+          "typical",
+        ].includes(String(one.kind)),
         `${at}.kind: unknown`
       );
       if (one.kind === "remove") {

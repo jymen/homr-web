@@ -44,7 +44,13 @@ from homr.staff_detection import (
 )
 
 from homr.transformer.staff2score import ConvertToArray  # noqa: E402
-from homr.transformer.vocabulary import EncodedSymbol, prior_power_of_two, remove_duplicated_symbols  # noqa: E402
+from homr.transformer.vocabulary import (  # noqa: E402
+    EncodedSymbol,
+    _get_duration_of_measure,
+    _get_typical_duration_of_measures,
+    prior_power_of_two,
+    remove_duplicated_symbols,
+)
 
 ROOT = Path(__file__).resolve().parent.parent
 VECTORS = ROOT / "test" / "golden" / "vectors"
@@ -1663,6 +1669,26 @@ def dump_vocabulary_cleanup() -> None:
         cases.append({"kind": "duration", "rhythm": rhythm, "fraction": [d.fraction.numerator, d.fraction.denominator],
                       "dots": d.dots, "actualNotes": d.actual_notes, "normalNotes": d.normal_notes, "kern": d.kern,
                       "base": [d.base_duration.numerator, d.base_duration.denominator]})
+    measures = {
+        "shortest of a chord counts": [[note("note_4"), note("note_8", "E4")], [note("note_2")]],
+        "longest first in a chord": [[note("note_2"), note("note_16", "E4"), note("note_4", "G4")]],
+        "a grace note after a longer note": [[note("note_4"), note("note_8G", "E4")], [note("note_4")]],
+        "a grace note alone": [[note("note_8G")], [note("note_4")]],
+        "clef and barline count nothing": [[["clef_G2", "_", "_", "_", "_", "upper"]], [note("rest_8")], [bar]],
+    }
+    for name, measure in measures.items():
+        chords = [[symbol_of(s) for s in chord] for chord in measure]
+        d = _get_duration_of_measure(chords)
+        cases.append({"kind": "measure", "name": name, "measure": measure, "result": [d.numerator, d.denominator]})
+    typical = {
+        "even count takes the upper middle": [[[note("note_2")]], [[note("note_4")]], [[note("note_1")]], [[note("note_8")]]],
+        "odd count": [[[note("note_2")]], [[note("note_4")]], [[note("note_8")]]],
+        "none": [],
+    }
+    for name, measures_ in typical.items():
+        built = [[[symbol_of(s) for s in chord] for chord in m] for m in measures_]
+        d = _get_typical_duration_of_measures(built)
+        cases.append({"kind": "typical", "name": name, "measures": measures_, "result": [d.numerator, d.denominator]})
     for n in [-3, 0, 1, 2, 3, 7, 8, 9, 96, 129]:
         cases.append({"kind": "priorPowerOfTwo", "n": n, "result": prior_power_of_two(n)})
     write_vectors("vocabulary-cleanup", cases, symbols="[rhythm, pitch, lift, articulation, slur, position], missing fields '.'")

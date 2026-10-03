@@ -166,8 +166,9 @@ describe("runDecoder", () => {
   it("stops after max_seq_len steps without EOS", async () => {
     const { run, session } = scriptedDecoder([]);
     const symbols = await runDecoder(session, context());
-    expect(run).toHaveBeenCalledTimes(MAX_SEQ_LEN);
-    expect(symbols).toHaveLength(MAX_SEQ_LEN);
+    expect(MAX_SEQ_LEN).toBe(608);
+    expect(run).toHaveBeenCalledTimes(608);
+    expect(symbols).toHaveLength(608);
   });
 
   it("rejects with the signal's reason before the next step, and releases the caches", async () => {

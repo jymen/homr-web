@@ -19,8 +19,8 @@ import {
   toUpperPosition,
 } from "./symbol.js";
 
-type Chord = readonly EncodedSymbol[];
-type Measure = readonly Chord[];
+export type Chord = readonly EncodedSymbol[];
+export type Measure = readonly Chord[];
 
 const isNoteOrRest = (rhythm: string): boolean =>
   rhythm.startsWith("note") || rhythm.startsWith("rest");
@@ -98,7 +98,7 @@ export function durationOfMeasure(measure: Measure): Ratio {
   return total;
 }
 
-function typicalDurationOfMeasures(measures: readonly Measure[]): Ratio {
+export function typicalDurationOfMeasures(measures: readonly Measure[]): Ratio {
   const sorted = measures.map(durationOfMeasure).sort(compareRatio);
   return sorted[Math.floor(sorted.length / 2)] ?? ZERO;
 }
