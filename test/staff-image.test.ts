@@ -11,6 +11,7 @@ import { decodeStaffs } from "../src/golden/decode.js";
 import {
   cropPlaneAndReturnNewTop,
   type GrayImage,
+  planeFromBytes,
 } from "../src/image/plane.js";
 import { createMultiStaff, type Staff } from "../src/model/staff.js";
 import {
@@ -113,6 +114,9 @@ describe("regrouping, staff-regrouping.json", () => {
         result.map((ms) => ms.staffs.map((s) => staffs.indexOf(s)))
       ).toEqual(one.result);
       const regions = staffRegions(systems);
+      expect(staffs.map((staff) => staffRegion(staff, regions))).toEqual(
+        one.calculatedRegions
+      );
       for (const [y, above, below] of one.regions as [
         number,
         number,
@@ -125,6 +129,30 @@ describe("regrouping, staff-regrouping.json", () => {
       }
     });
   }
+});
+
+const grayOfRows = (rows: unknown): GrayImage => {
+  const values = rows as number[][];
+  const width = values[0]?.length ?? 0;
+  return planeFromBytes(
+    "gray",
+    width,
+    values.length,
+    Uint8Array.from(values.flat())
+  );
+};
+
+describe("removeBlackContoursAtEdges, black-contours.json", () => {
+  const { cases } = vectorSet("black-contours");
+  it.each(cases.map((c) => [c.name, c] as const))("%s", async (_, one) => {
+    const cv = await testOpenCv();
+    const cleaned = removeBlackContoursAtEdges(
+      cv,
+      grayOfRows(one.image),
+      one.unitSize as number
+    );
+    expect(differing(cleaned, grayOfRows(one.cleaned))).toBe(0);
+  });
 });
 
 describe.each(listGoldenFixtures())("$name", (fixture) => {

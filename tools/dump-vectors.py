@@ -22,7 +22,12 @@ from homr.brace_dot_detection import _merge_multi_staff_if_they_share_a_staff
 from homr.model import MultiStaff, Staff, StaffPoint, StemDirection
 from homr.note_detection import NoteheadWithStem, add_notes_to_staffs, adjust_bbox, check_bbox_size
 from homr.staff_dewarping import calculate_dewarp_transformation, calculate_span_and_optimal_points
-from homr.staff_parsing import _ensure_same_number_of_staffs, get_tr_omr_canvas_size
+from homr.staff_parsing import (
+    _calculate_region,
+    _ensure_same_number_of_staffs,
+    get_tr_omr_canvas_size,
+    remove_black_contours_at_edges_of_image,
+)
 from homr.staff_regions import StaffRegions
 from homr.staff_detection import (
     RawStaff,
@@ -1460,6 +1465,7 @@ def regrouping_case(name: str, height: int, systems: list[list[Staff]]):
             [y, regions.get_start_of_closest_staff_above(y), regions.get_start_of_closest_staff_below(y)]
             for y in probes
         ],
+        "calculatedRegions": [_calculate_region(staff, regions) for staff in staffs],
     }
 
 
@@ -1475,6 +1481,8 @@ def dump_staff_regrouping() -> None:
         regrouping_case("last system odd, height minus max_x near 0", 530, [[at(100), at(250)], [at(500), at(650)], [at(900)]]),
         regrouping_case("two systems that differ", 2000, [[at(500), at(650)], [at(100)]]),
         regrouping_case("a middle system odd", 2000, [[at(100), at(250)], [at(500)], [at(800), at(950)]]),
+        regrouping_case("two systems, the odd one near the edge", 2000, [[at(100, 20.0)], [at(400), at(550)]]),
+        regrouping_case("a staff at the left edge", 2000, [[at(100, 5.0)], [at(400, 30.5)]]),
     ]
     sizes = [[h, w, get_tr_omr_canvas_size((h, w))] for h, w in [(200, 1000), (256, 1280), (257, 1280), (300, 1000), (150, 1500), (1, 3), (333, 1777)]]
     write_vectors(
@@ -1482,6 +1490,7 @@ def dump_staff_regrouping() -> None:
         cases + [{"name": "get_tr_omr_canvas_size", "sizes": sizes}],
         systems="indices into staffs; result is _ensure_same_number_of_staffs as the same indices",
         regions="[y, get_start_of_closest_staff_above(y), get_start_of_closest_staff_below(y)]",
+        calculatedRegions="_calculate_region(staff, StaffRegions(systems)) per staff",
     )
 
 
@@ -1514,6 +1523,10 @@ def dump_dewarp_points() -> None:
         points_case("staff covers part of the width", curved_staff(700, 80.0, 6.0, 500.0, start=250.0), 700, 160),
         points_case("too short for six rows", curved_staff(300, 3.0, 0.0, 600.0), 300, 5),
         points_case("too few points per row", curved_staff(170, 80.0, 0.0, 600.0, start=10.0), 170, 160),
+        points_case("three points per row, the third on the right margin", curved_staff(252, 80.0, 0.0, 600.0, start=10.0), 252, 160),
+        points_case("two points per row", curved_staff(172, 80.0, 0.0, 600.0, start=10.0), 172, 160),
+        points_case("rising steeply, rows near the bottom margin", staff_of([(float(x), five(140.0 - 0.03 * x, 4.0), 0.0) for x in np.arange(0.0, 701.0, 10.0)]), 700, 160),
+        points_case("a point on the top margin", staff_of([(float(x), five(60.0 + (8.0 if x > 50 else 0.0), 4.0), 0.0) for x in np.arange(0.0, 701.0, 10.0)]), 700, 160),
     ]
     write_vectors(
         "dewarp-points",
@@ -1562,6 +1575,33 @@ def dump_dewarp_warp() -> None:
     )
 
 
+def contour_image(height: int, width: int, blobs: list[tuple[int, int, int, int, int]]) -> np.ndarray:
+    image = np.full((height, width), 200, dtype=np.uint8)
+    for x, y, w, h, value in blobs:
+        image[y : y + h, x : x + w] = value
+    return image
+
+
+def dump_black_contours() -> None:
+    shapes = [
+        ("a dark block on the left edge", [(0, 10, 20, 20, 0)]),
+        ("a dark block inside", [(30, 10, 20, 20, 0)]),
+        ("a block on the right and the bottom edge", [(40, 20, 20, 20, 10)]),
+        ("too narrow", [(0, 10, 7, 30, 0)]),
+        ("too short", [(0, 10, 30, 7, 0)]),
+        ("exactly the threshold", [(0, 10, 8, 8, 0)]),
+        ("gray 98 is light, 97 is dark", [(0, 0, 20, 20, 98), (40, 20, 20, 20, 97)]),
+        ("a dark frame, mostly light inside", [(0, 0, 30, 3, 0), (0, 0, 3, 30, 0), (27, 0, 3, 30, 0), (0, 27, 30, 3, 0)]),
+        ("an L at the top edge, half dark", [(10, 0, 30, 4, 0), (10, 0, 4, 30, 0)]),
+    ]
+    cases = []
+    for name, blobs in shapes:
+        image = contour_image(40, 60, blobs)
+        cleaned = remove_black_contours_at_edges_of_image(image.copy(), 4.0)
+        cases.append({"name": name, "unitSize": 4.0, "image": image, "cleaned": cleaned})
+    write_vectors("black-contours", cases, image="rows of gray values", unitSize="the threshold is 2 * unitSize")
+
+
 DUMPERS = {
     "pairwise": dump_pairwise,
     "floor-div": dump_floor_div,
@@ -1587,6 +1627,7 @@ DUMPERS = {
     "staff-regrouping": dump_staff_regrouping,
     "dewarp-points": dump_dewarp_points,
     "dewarp-warp": dump_dewarp_warp,
+    "black-contours": dump_black_contours,
 }
 
 

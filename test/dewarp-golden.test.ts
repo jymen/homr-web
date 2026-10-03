@@ -69,6 +69,11 @@ const maxMatrixDifference = (
  */
 const TYPESET_CEILING = 1;
 
+const affineOf = (value: unknown): (AffineMatrix | null)[] =>
+  (value as (number[][] | null)[]).map((m) =>
+    m === null ? null : (m.flat() as unknown as AffineMatrix)
+  );
+
 const differing = (a: GrayImage, b: GrayImage): number =>
   a.data.reduce((count, v, i) => count + (v === b.data[i] ? 0 : 1), 0);
 
@@ -141,6 +146,14 @@ describe("spanAndOptimalPoints and dewarpTransformation, dewarp-points.json", ()
     const transform = dewarpTransformation(cv, width, height, points);
     expect(transform.mesh.points).toEqual(pointsOf(one.src));
     expect(transform.dst).toEqual(pointsOf(one.dst));
+    const python = estimatePiecewiseAffine(
+      cv,
+      { points: pointsOf(one.src), triangles: one.simplices as Triangle[] },
+      pointsOf(one.dst)
+    );
+    expect(
+      maxMatrixDifference(python.matrices, affineOf(one.affine))
+    ).toBeLessThan(1e-9);
   });
 });
 

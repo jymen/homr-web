@@ -24,6 +24,7 @@ const vectorRoot = join(import.meta.dirname, "..", "golden", "vectors");
 export const VECTOR_FILES = [
   "argsort",
   "bbox-split",
+  "black-contours",
   "braces",
   "braces-units",
   "connect-lines",
@@ -290,6 +291,17 @@ const VECTOR_CHECKS: Record<VectorFile, VectorCheck> = {
       }
     },
     keys: ["name", "mask", "bbox", "unitSize", "adjusted"],
+  },
+  "black-contours": {
+    check: (one, at) => {
+      const rows = list(one.image, `${at}.image`);
+      need(
+        list(one.cleaned, `${at}.cleaned`).length === rows.length,
+        `${at}.cleaned: one row per image row`
+      );
+      need(isNumber(one.unitSize), `${at}.unitSize: expected a number`);
+    },
+    keys: ["name", "unitSize", "image", "cleaned"],
   },
   braces: BRACES_CHECK,
   "braces-units": BRACES_CHECK,
