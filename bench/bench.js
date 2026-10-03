@@ -25,6 +25,11 @@
  * mean absolute difference. Detection here ran on the browser's own masks, so
  * a difference includes anything detection did differently.
  *
+ * Under each pair, the transformer runs twice: on homr's canvas, which is the
+ * golden test's input and isolates the encoder's backend, and on this port's
+ * canvas, which is what a musician gets. Both token lists are compared with
+ * tokens-<n>.json on the six heads, with the per-staff and per-step time.
+ *
  * This is also the first exercise of the default opencv.js path: the Node tests
  * inject a createRequire source because the dynamic import hangs under vitest,
  * so `preprocessPage(image)` is called with no `cv` argument on purpose, and the
@@ -41,6 +46,7 @@ import {
   browserCache,
   colorImageFromRgba,
   createInputPredictions,
+  createStaffCanvas,
   DetectionError,
   detectStaffsInImage,
   ensureSameNumberOfStaffs,
@@ -48,7 +54,9 @@ import {
   MASK_CLASS_NAMES,
   ModelError,
   ModelStore,
+  parseStaffCanvas,
   planeAgreement,
+  planeFromBytes,
   preprocessPage,
   rgbaFromPlane,
   segmentPage,
@@ -547,11 +555,78 @@ function meanAbsoluteDifference(a, b) {
   return total / a.data.length;
 }
 
+const HEADS = ["rhythm", "pitch", "lift", "articulation", "slur", "position"];
+const symbolText = (s) => HEADS.map((h) => s[h]).join(" ");
+
+/** parseStaffCanvas with its timing, and where its heads first leave homr's. */
+async function transcribe(sessions, canvas, expected) {
+  let steps = 0;
+  let firstStepAt = 0;
+  const startedAt = performance.now();
+  const tokens = await parseStaffCanvas(sessions, canvas, {
+    onStep: (step) => {
+      steps = step;
+      if (step === 1) {
+        firstStepAt = performance.now();
+      }
+    },
+  });
+  const endedAt = performance.now();
+  const length = Math.max(tokens.length, expected.length);
+  let firstDifference = -1;
+  for (let i = 0; i < length && firstDifference < 0; i += 1) {
+    const got = tokens[i];
+    const want = expected[i];
+    if (
+      got === undefined ||
+      want === undefined ||
+      symbolText(got) !== symbolText(want)
+    ) {
+      firstDifference = i;
+    }
+  }
+  return {
+    encodeMs: firstStepAt - startedAt,
+    firstDifference,
+    perStepMs: (endedAt - firstStepAt) / Math.max(steps - 1, 1),
+    staffMs: endedAt - startedAt,
+    steps,
+    tokens,
+  };
+}
+
+function tokenLine(label, run, expected) {
+  const verdict =
+    run.firstDifference < 0
+      ? `equal to tokens-<n>.json (${expected.length})`
+      : `DIFFERS from token ${run.firstDifference}: ${run.tokens[run.firstDifference] ? symbolText(run.tokens[run.firstDifference]) : "end"} where homr has ${expected[run.firstDifference] ? symbolText(expected[run.firstDifference]) : "end"}`;
+  return `${label}: ${run.tokens.length} tokens, ${run.steps} steps, staff ${ms(run.staffMs)} (encoder and step 0 ${ms(run.encodeMs)}, then ${run.perStepMs.toFixed(1)} ms/step), ${verdict}`;
+}
+
 async function showCanvases(cv, detected, page) {
   ui.canvases.replaceChildren();
   if (detected.failure !== undefined) {
     return;
   }
+  const store = new ModelStore({
+    baseUrl: MODELS_BASE_URL,
+    cache: await browserCache(),
+    runtime,
+  });
+  try {
+    const sessions = {
+      decoder: await store.open("decoder"),
+      encoder: await store.open("encoder"),
+    };
+    log(`  encoder: ${store.plan("encoder").reason}`);
+    log(`  decoder: ${store.plan("decoder").reason}`);
+    await drawCanvases(cv, detected, page, sessions);
+  } finally {
+    await store.close();
+  }
+}
+
+async function drawCanvases(cv, detected, page, sessions) {
   const startedAt = performance.now();
   const canvases = staffCanvases(
     cv,
@@ -578,10 +653,33 @@ async function showCanvases(cv, detected, page) {
     log(
       `  canvas ${n}: mean absolute difference from homr's ${difference.toFixed(4)}, region ${staffRegion(staffs[n], regions).join(",")} where homr's is ${dewarp.region.join(",")}`
     );
+    const expected = await (await fetch(`${base}/tokens-${n}.json`)).json();
+    const onHomr = await transcribe(
+      sessions,
+      createStaffCanvas(
+        planeFromBytes("gray", golden.width, golden.height, golden.data),
+        canvas.staff
+      ),
+      expected
+    );
+    const onPort = await transcribe(sessions, canvas, expected);
+    const lines = [
+      tokenLine("homr's canvas", onHomr, expected),
+      tokenLine("this port's canvas", onPort, expected),
+    ];
+    for (const line of lines) {
+      log(`  ${line}`);
+    }
     const figure = document.createElement("figure");
     const caption = document.createElement("figcaption");
     caption.textContent = `canvas ${n}: this port above, homr below, mean absolute difference ${difference.toFixed(4)}`;
-    figure.append(caption, drawGray(canvas.image), drawGray(golden));
+    const tokens = document.createElement("pre");
+    tokens.style.whiteSpace = "pre-wrap";
+    tokens.textContent = [
+      ...lines,
+      onPort.tokens.map(symbolText).join(" | "),
+    ].join("\n");
+    figure.append(caption, drawGray(canvas.image), drawGray(golden), tokens);
     ui.canvases.append(figure);
   }
 }
