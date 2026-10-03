@@ -43,6 +43,7 @@ from homr.staff_detection import (
     resample_staff,
 )
 
+from homr.music_xml_generator import XmlGeneratorArguments, generate_xml  # noqa: E402
 from homr.transformer.staff2score import ConvertToArray  # noqa: E402
 from homr.transformer.vocabulary import (  # noqa: E402
     EncodedSymbol,
@@ -1694,6 +1695,80 @@ def dump_vocabulary_cleanup() -> None:
     write_vectors("vocabulary-cleanup", cases, symbols="[rhythm, pitch, lift, articulation, slur, position], missing fields '.'")
 
 
+# musicxml.json
+#
+# generate_xml on hand-built voices, one case per branch of
+# music_xml_generator.py, with what it printed to stderr and the error it
+# raised. The two pages are plain tunes; these are the chords, grace notes,
+# tuplets, repeats, voltas and articulations they never reach.
+
+
+def art(rhythm: str, articulation: str, slur: str = "_", pitch: str = "C4", lift: str = "_", position: str = "upper") -> list[str]:
+    return [rhythm, pitch, lift, articulation, slur, position]
+
+
+def dump_musicxml() -> None:
+    import contextlib
+    import io
+
+    bar = ["barline"]
+    nl = ["newline"]
+    chord = ["chord"]
+    g2 = ["clef_G2", "_", "_", "_", "_", "upper"]
+    f4 = ["clef_F4", "_", "_", "_", "_", "lower"]
+    head = [g2, ["keySignature_1"], ["timeSignature/8"]]
+    voices = {
+        "a plain tune with a system break": [head + [note("note_8", "D5"), bar, note("note_4.", "G4"), note("note_8", "A4"), bar, nl, note("note_2.", "B4"), bar, nl]],
+        "empty voice": [[]],
+        "two voices, one on two staves": [
+            head + [note("note_4"), bar],
+            [g2, chord, f4, note("note_4", "E4"), chord, note("note_4", "C3", "lower"), bar],
+        ],
+        "chord of three durations": [[g2, note("note_4", "C4"), chord, note("note_8", "E4"), chord, note("note_2", "G4"), note("note_4", "A4"), bar]],
+        "two staves with a lower rest only": [[g2, chord, f4, note("note_4", "E4"), chord, ["rest_4", "_", "_", "_", "_", "lower"], note("note_2", "D4"), chord, note("note_2", "D3", "lower"), bar]],
+        "upper and lower of different lengths": [[g2, chord, f4, note("note_2", "E4"), chord, note("note_4", "C3", "lower"), note("note_4", "D3", "lower"), bar]],
+        "grace notes and a grace rest": [[g2, note("note_8G", "D5"), note("note_4", "C5"), note("note_16G.", "E5"), chord, note("note_8G", "G5"), note("note_4", "B4"), ["rest_8G", "_", "_", "_", "_", "upper"], note("note_2", "A4"), bar]],
+        "whole measure rest and breve-like kern 0": [[g2, ["timeSignature/4"], ["rest_0", "_", "_", "_", "_", "upper"], bar, note("note_0", "C4"), bar, note("note_0G", "D4"), note("note_1", "E4"), bar]],
+        "whole measure rest in a chord": [[g2, ["rest_0", "_", "_", "_", "_", "upper"], chord, note("note_4", "C4"), bar]],
+        "a complete triplet": [[g2, note("note_12", "C4"), note("note_12", "D4"), note("note_12", "E4"), note("note_4", "F4"), note("note_2", "G4"), bar]],
+        "an incomplete triplet": [[g2, note("note_12", "C4"), note("note_12", "D4"), note("note_4", "E4"), bar, note("note_12", "C4"), note("note_12", "D4"), note("note_12", "E4"), bar]],
+        "a triplet of mixed formats": [[g2, note("note_12", "C4"), note("note_6", "D4"), note("note_12", "E4"), bar]],
+        "sixes, fives and sevens": [[g2, note("note_6", "C4"), note("note_6", "D4"), note("note_6", "E4"), bar, note("note_20", "C4"), note("note_20", "C4"), note("note_20", "C4"), note("note_20", "C4"), note("note_20", "C4"), note("note_7", "D4"), bar, note("note_6.", "E4"), note("note_3", "F4"), bar]],
+        "dots": [[g2, note("note_4.", "C4"), note("note_8..", "D4"), note("note_32", "E4"), note("note_2..", "F4"), bar]],
+        "lifts": [[g2] + [art("note_8", "_", lift=lift) for lift in ["#", "##", "b", "bb", "N", "_", "."]] + [bar]],
+        "a note without a pitch": [[g2, note("note_4", "."), bar]],
+        "articulations": [[g2] + [art("note_8", a) for a in ["accent_arpeggiate_fermata", "breathMark_fermata_tenuto", "staccato_tremolo", "tremolo", "trill", "turn", "staccatissimo", "fermata_turn", "accent_breathMark", "caesura_doit", "tieStart", "tieStop", "slurStart_slurStop", ".", "_"]] + [bar]],
+        "an unsupported articulation": [[g2, art("note_4", "spiccato"), bar]],
+        "slurs on both staves": [[g2, chord, f4, art("note_4", "_", "slurStart"), chord, art("note_4", "_", "slurStart", "C3", position="lower"), art("note_4", "_", "slurStart_slurStop"), art("note_4", "_", "."), art("note_4", "_", "slurStop"), chord, art("note_4", "_", "slurStop", "C3", position="lower"), bar]],
+        "an unsupported slur": [[g2, art("note_4", "_", "slurStop_slurStart"), bar]],
+        "barline styles": [[g2, note("note_4"), ["doublebarline"], note("note_4"), ["bolddoublebarline"], note("note_4"), bar]],
+        "repeats": [[g2, note("note_4"), bar, ["repeatStart"], note("note_4"), ["repeatEnd"], note("note_4"), ["repeatEndStart"], note("note_4"), ["repeatEnd"], ["repeatStart"], ["repeatEnd"], note("note_4")]],
+        "voltas": [[g2, note("note_4"), ["voltaStart"], note("note_4"), ["voltaStop"], bar, ["voltaStart"], note("note_4"), ["voltaDiscontinue"], bar, note("note_4"), bar, ["voltaStart"], note("note_4"), ["voltaStop"], ["repeatEnd"]]],
+        "multirests": [[g2, ["rest_4m", "_", "_", "_", "_", "upper"], bar, ["rest_2m", "_", "_", "_", "_", "upper"], ["rest_3m", "_", "_", "_", "_", "upper"], bar, ["rest_2m", "_", "_", "_", "_", "upper"], chord, note("note_4"), bar]],
+        "time signature from an even measure count": [[g2, ["timeSignature/8"], note("note_4"), note("note_8"), bar, note("note_4"), note("note_4"), bar, note("note_8."), bar, note("note_2"), bar]],
+        "time signature with no measure": [[g2, ["timeSignature/4"]]],
+        "clef, key and time interleaved with notes": [[g2, ["keySignature_-3"], note("note_4"), ["clef_F4", "_", "_", "_", "_", "upper"], ["keySignature_2"], ["timeSignature/4"], note("note_4", "C3"), ["keySignature_0"], note("note_4"), bar, ["clef_C3", "_", "_", "_", "_", "upper"], ["clef_G1", "_", "_", "_", "_", "upper"], note("note_4"), bar]],
+        "a clef chorded with a note": [[g2, note("note_4"), chord, g2, ["timeSignature/4"], note("note_4"), chord, g2, bar]],
+        "an unsupported symbol": [[g2, note("note_4"), ["EOS"], note("note_4"), bar]],
+        "a grace note with a tuplet kern": [[g2, note("note_3G"), note("note_4"), bar]],
+        "a chord of a tuplet and a plain note": [[g2, note("note_3", "C4"), chord, note("note_4", "E4"), note("note_4"), bar]],
+        "lower-staff chord layers": [[g2, chord, f4, note("note_2", "C5"), chord, note("note_4", "E5"), chord, note("note_2", "C3", "lower"), chord, note("note_8", "E3", "lower"), note("note_4", "D5"), chord, note("note_4", "D3", "lower"), bar]],
+    }
+    cases = []
+    for name, built in voices.items():
+        staffs = [[symbol_of(s) for s in voice] for voice in built]
+        stderr = io.StringIO()
+        case = {"name": name, "voices": built}
+        with contextlib.redirect_stderr(stderr):
+            try:
+                case["xml"] = generate_xml(XmlGeneratorArguments(False, None, None), staffs, "").to_string()
+            except (ValueError, KeyError) as error:
+                case["error"] = f"{type(error).__name__}: {error}"
+        case["log"] = stderr.getvalue().splitlines()
+        cases.append(case)
+    write_vectors("musicxml", cases, symbols="[rhythm, pitch, lift, articulation, slur, position], missing fields '.'; xml is to_string(), error the exception generate_xml raised, log its stderr lines")
+
+
 # normalize.json
 
 
@@ -1733,6 +1808,7 @@ DUMPERS = {
     "black-contours": dump_black_contours,
     "vocabulary-cleanup": dump_vocabulary_cleanup,
     "normalize": dump_normalize,
+    "musicxml": dump_musicxml,
 }
 
 

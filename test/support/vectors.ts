@@ -40,6 +40,7 @@ export const VECTOR_FILES = [
   "line-groups",
   "line-peak-groups",
   "multi-staff-merge",
+  "musicxml",
   "noise",
   "normalize",
   "notehead-clumps",
@@ -489,6 +490,22 @@ const VECTOR_CHECKS: Record<VectorFile, VectorCheck> = {
       }
     },
     keys: ["name", "given", "merged"],
+  },
+  musicxml: {
+    check: (one, at) => {
+      for (const [i, voice] of list(one.voices, `${at}.voices`).entries()) {
+        symbolRows(voice, `${at}.voices[${i}]`);
+      }
+      need(
+        typeof one.xml === "string" || typeof one.error === "string",
+        `${at}: neither xml nor error`
+      );
+      need(
+        list(one.log, `${at}.log`).every((line) => typeof line === "string"),
+        `${at}.log: expected strings`
+      );
+    },
+    keys: ["name", "voices", "log"],
   },
   noise: {
     check: (one, at) => {
