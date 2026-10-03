@@ -87,8 +87,8 @@ function headersFor(pathname, size) {
 /**
  * The bench page's import map, applied by the server to dist/. A module
  * Worker gets no import map in Chrome, and dist/worker.js reaches the same
- * three packages the page does, so the bare specifiers are rewritten here
- * instead. A bundler does this for a real consumer.
+ * packages the page does, delaunator's own import of robust-predicates
+ * included, so the bare specifiers are rewritten here instead. A bundler does this for a real consumer.
  */
 const BARE_SPECIFIERS = {
   "@techstark/opencv-js": "/bench/opencv-esm.js",
@@ -99,9 +99,11 @@ const BARE_SPECIFIERS = {
 
 const rewriteBareSpecifiers = (source) =>
   source.replace(
-    /(from\s*|import\(\s*)"([^"./][^"]*)"/g,
-    (whole, lead, name) =>
-      name in BARE_SPECIFIERS ? `${lead}"${BARE_SPECIFIERS[name]}"` : whole
+    /(from\s*|import\(\s*)(["'])([^"'./][^"']*)\2/g,
+    (whole, lead, quote, name) =>
+      name in BARE_SPECIFIERS
+        ? `${lead}${quote}${BARE_SPECIFIERS[name]}${quote}`
+        : whole
   );
 
 function refuse(response, status, message) {
@@ -137,7 +139,11 @@ async function serve(request, response) {
     refuse(response, 404, `${pathname} is not a file`);
     return;
   }
-  if (pathname.startsWith("/dist/") && pathname.endsWith(".js")) {
+  if (
+    (pathname.startsWith("/dist/") ||
+      pathname.startsWith("/node_modules/delaunator/")) &&
+    pathname.endsWith(".js")
+  ) {
     const body = Buffer.from(
       rewriteBareSpecifiers(await readFile(file, "utf8")),
       "utf8"
