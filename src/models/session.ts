@@ -273,9 +273,9 @@ export async function handoff(
     );
   }
   const wants = to.inputSpec(plan.input).type;
-  // On WebGPU the fp16 encoder hands a half context to a decoder whose edges
-  // are float32, so the cast below still runs there; were the dtypes to agree,
-  // the context would stay on the GPU without this line changing.
+  // Both decoders take float32 at their edges, so on WebGPU the fp16 encoder's
+  // context is cast below; were the dtypes to agree, it would stay on the GPU
+  // without this line changing.
   if (
     plan.cast === "none" &&
     !(plan.location === "cpu" && tensor.location !== "cpu")

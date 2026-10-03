@@ -5,9 +5,11 @@ import {
   DECODER_HEAD_OUTPUTS,
   DEFAULT_CATALOG,
   MODEL_ROLE_NAMES,
+  type ModelCatalog,
   type ModelRole,
   type Placement,
   resolveRole,
+  WEBGPU_DECODER_CATALOG,
 } from "../src/models/manifest.js";
 import { DECODER_OUTPUT_HEADS } from "../src/transformer/vocabulary.js";
 import { goldenPageOf, listGoldenFixtures } from "./support/golden.js";
@@ -94,30 +96,49 @@ describe("resolveRole", () => {
     expect(planOn("encoder", GPU).artifactId).toBe("encoder-396-fp16");
   });
 
-  it("takes the re-exported decoder on webgpu and the shipped one everywhere else", () => {
-    expect(planOn("decoder", GPU)).toMatchObject({
+  it("keeps the decoder on wasm fp32 whatever the placement asks for", () => {
+    for (const placement of [CPU, GPU, FP16_ON_WASM]) {
+      const plan = planOn("decoder", placement);
+      expect(plan.artifactId).toBe("decoder-396-fp32");
+      expect(plan.provider).toBe("wasm");
+    }
+    expect(planOn("decoder", GPU).reason).toContain(
+      "although WebGPU is available: the decoder is 3 to 4 times slower a step on the WebGPU EP"
+    );
+  });
+
+  it("puts the re-exported decoder on webgpu, its caches in GPU buffers, only in WEBGPU_DECODER_CATALOG", () => {
+    const plan = resolveRole(WEBGPU_DECODER_CATALOG, "decoder", GPU);
+    expect(plan).toMatchObject({
       artifactId: "decoder-396-web-fp16",
       provider: "webgpu",
-      reason: "decoder-396-web-fp16 on the webgpu EP",
     });
+    expect(plan.outputsOnGpu).toEqual([...DECODER_CACHE_OUT]);
+    expect(
+      resolveRole(WEBGPU_DECODER_CATALOG, "encoder", GPU).outputsOnGpu
+    ).toEqual(["output"]);
     for (const placement of [CPU, THREADS]) {
-      expect(planOn("decoder", placement).artifactId).toBe("decoder-396-fp32");
+      expect(resolveRole(WEBGPU_DECODER_CATALOG, "decoder", placement)).toEqual(
+        planOn("decoder", placement)
+      );
     }
   });
 
   it("gives both decoders one tensor contract", () => {
-    const contract = (placement: Placement) => {
-      const { artifact } = planOn("decoder", placement);
+    const contract = (catalog: ModelCatalog) => {
+      const { artifact } = resolveRole(catalog, "decoder", GPU);
       return [...artifact.inputs, ...artifact.outputs].map(
         (spec) => `${spec.name}:${spec.type}`
       );
     };
-    expect(contract(GPU)).toEqual(contract(CPU));
+    expect(contract(WEBGPU_DECODER_CATALOG)).toEqual(contract(DEFAULT_CATALOG));
   });
 
-  it("grants the encoder's gpu-buffer request once the decoder is on webgpu too", () => {
-    expect(planOn("encoder", GPU).outputsOnGpu).toEqual(["output"]);
-    expect(planOn("encoder", FP16_ON_WASM).outputsOnGpu).toEqual([]);
+  it("refuses the encoder's gpu-buffer request while the decoder is on wasm", () => {
+    expect(DEFAULT_CATALOG.roles.encoder.onWebgpu).toMatchObject({
+      keepOutputsOnGpu: ["output"],
+    });
+    expect(planOn("encoder", GPU).outputsOnGpu).toEqual([]);
   });
 
   it("leaves segnet's logits on the cpu for the argmax", () => {
@@ -134,7 +155,7 @@ describe("resolveRole", () => {
     expect(planOn("encoder", GPU).handoff).toEqual({
       cast: { from: "float16", to: "float32" },
       input: "context",
-      location: "gpu-buffer",
+      location: "cpu",
       to: "decoder",
     });
   });

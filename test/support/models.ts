@@ -24,6 +24,7 @@ import {
   ARTIFACT_IDS,
   ARTIFACTS,
   type ArtifactRecord,
+  type ModelCatalog,
   type Placement,
 } from "../../src/models/manifest.js";
 import {
@@ -93,11 +94,13 @@ export const localModels =
 
 export const storeOn = async (
   placement: Placement,
-  onEvent?: (event: ModelEvent) => void
+  onEvent?: (event: ModelEvent) => void,
+  catalog?: ModelCatalog
 ): Promise<ModelStore> =>
   new ModelStore({
     baseUrl: "file:///models/",
     cache: memoryCache(),
+    ...(catalog === undefined ? {} : { catalog }),
     fetchBytes: localModels(),
     placement,
     runtime: await wasmRuntime(),

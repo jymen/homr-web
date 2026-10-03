@@ -7,6 +7,7 @@
 
 import { expect, it } from "vitest";
 import { createStaffCanvas } from "../src/model/pipeline.js";
+import { WEBGPU_DECODER_CATALOG } from "../src/models/manifest.js";
 import {
   parseStaffCanvas,
   parseStaffs,
@@ -132,9 +133,9 @@ describeWithModels("transformer on Python's staff canvases", () => {
 });
 
 /**
- * The WebGPU path's artifacts, the fp16 encoder and tools/export-decoder.py's
- * re-exported decoder, on the WebAssembly provider: the CI view of what the
- * bench runs on WebGPU. Tokens only. The re-export is unfused and not int8, so
+ * WEBGPU_DECODER_CATALOG's artifacts, the fp16 encoder and
+ * tools/export-decoder.py's re-exported decoder, on the WebAssembly provider:
+ * the CI view of what the bench's decoder=webgpu runs. Tokens only. The re-export is unfused and not int8, so
  * its attention coordinates move against the shipped decoder's by up to 9 px
  * with every token equal (tools/verify-decoder.py), past the 6 px above.
  */
@@ -146,7 +147,11 @@ describeWithModels(
         `${fixture.name}: every canvas gives tokens-<n>.json`,
         async () => {
           const golden = goldenPageOf(fixture);
-          const store = await storeOn(FP16_ON_WASM);
+          const store = await storeOn(
+            FP16_ON_WASM,
+            undefined,
+            WEBGPU_DECODER_CATALOG
+          );
           try {
             const sessions: TransformerSessions = {
               decoder: await store.open("decoder"),

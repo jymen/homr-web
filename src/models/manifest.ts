@@ -6,7 +6,7 @@
  * hand-written policy, one row per role, each citing homr's source.
  *
  * This is the only module in the library that expresses the fp16-on-GPU /
- * fp32-on-CPU arrangement. No
+ * fp32-on-CPU arrangement and the decoder's stay on WebAssembly. No
  * other function and no call site branches on a backend or on a precision.
  * There is no I/O here.
  */
@@ -58,7 +58,8 @@ export interface ArtifactRecord {
  *
  * There is no decoder-396-fp16 row. homr's release has one and uses it on CUDA
  * only, fused, so the WebGPU EP cannot run it; a row nothing can reach goes
- * stale silently. decoder-396-web-fp16 is this port's own re-export.
+ * stale silently. decoder-396-web-fp16 is this port's own re-export, reached
+ * through WEBGPU_DECODER_CATALOG.
  */
 export const ARTIFACT_IDS = [
   "decoder-396-fp32",
@@ -113,16 +114,16 @@ export interface RolePolicy {
 export const MODEL_ROLES = {
   decoder: {
     cpu: "decoder-396-fp32",
-    // The shipped decoder is fused (com.microsoft SkipLayerNormalization, with
-    // no WebGPU kernel) and int8, so the GPU path takes tools/export-decoder.py's
-    // unfused re-export of the same checkpoint, fp16 inside and float32 at its
-    // edges. The WebAssembly path keeps homr's fp32 CPU file: homr finds the
-    // fp16 model "slower than the fp32 model on the CPU EP"
-    // (homr/onnx_providers.py:1-16).
     onWebgpu: {
-      artifact: "decoder-396-web-fp16",
-      keepOutputsOnGpu: [],
-      kind: "gpu",
+      kind: "stay-on-cpu",
+      // The shipped decoder is fused (com.microsoft SkipLayerNormalization, no
+      // WebGPU kernel). tools/export-decoder.py's unfused re-export runs on the
+      // WebGPU EP with homr's tokens, but one token per run is all dispatch:
+      // 77 to 85 ms a step with the caches left on the GPU, 130 ms without,
+      // against 22 ms on four wasm threads in the same Chrome session
+      // (docs/decisions.tsv, phase 8).
+      // WEBGPU_DECODER_CATALOG keeps that placement measurable.
+      why: "the decoder is 3 to 4 times slower a step on the WebGPU EP than on wasm threads",
     },
   },
   encoder: {
@@ -286,7 +287,8 @@ function handoffFor(
 }
 
 /**
- * The single place the fp16-on-GPU / fp32-on-CPU arrangement is expressed.
+ * The single place the fp16-on-GPU / fp32-on-CPU arrangement and the decoder's
+ * stay on WebAssembly are expressed.
  */
 export function resolveRole(
   catalog: ModelCatalog,
@@ -939,4 +941,25 @@ export const DECODER_HEAD_OUTPUTS = [
 export const DEFAULT_CATALOG: ModelCatalog = {
   artifacts: ARTIFACTS,
   roles: MODEL_ROLES,
+};
+
+/**
+ * DEFAULT_CATALOG with the decoder on WebGPU: the fp16 re-export, its 32 caches
+ * left in GPU buffers between steps. Not the default because it is slower (see
+ * MODEL_ROLES.decoder); the bench's `decoder=webgpu` and a golden test use it,
+ * so the artifact cannot go stale unnoticed.
+ */
+export const WEBGPU_DECODER_CATALOG: ModelCatalog = {
+  artifacts: ARTIFACTS,
+  roles: {
+    ...MODEL_ROLES,
+    decoder: {
+      cpu: "decoder-396-fp32",
+      onWebgpu: {
+        artifact: "decoder-396-web-fp16",
+        keepOutputsOnGpu: DECODER_CACHE_OUT,
+        kind: "gpu",
+      },
+    },
+  },
 };

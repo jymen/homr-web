@@ -88,15 +88,10 @@ describe("sessionOptionsFor over every role, backend and provider", () => {
         );
       }
     }
-    // segnet's logits go to a CPU argmax; the encoder's context stays on the GPU
-    // only when the decoder runs there too, which a requested fp32-on-webgpu
-    // placement also asks for. That placement cannot open the decoder: the
-    // shipped fp32 file is fused, and the WebGPU EP has no kernel for it.
-    expect(pinned).toEqual([
-      "encoder webgpu/webgpu: output",
-      "encoder wasm-threads/webgpu: output",
-      "encoder wasm/webgpu: output",
-    ]);
+    // Nothing reaches a gpu-buffer today: segnet's logits go to a CPU argmax and
+    // the encoder's request is refused while the decoder is on WebAssembly. The
+    // first MODEL_ROLES row phase 8 changes turns this list non-empty.
+    expect(pinned).toEqual([]);
   });
 
   it("pins only segnet's own batch dimension, and refuses a batch nothing can take", () => {
@@ -279,7 +274,7 @@ describeWithModels("handoff from the encoder to the decoder", () => {
       const encoder = await store.open("encoder");
       const decoder = await store.open("decoder");
       expect(encoder.plan.artifactId).toBe("encoder-396-fp16");
-      expect(decoder.plan.artifactId).toBe("decoder-396-web-fp16");
+      expect(decoder.plan.artifactId).toBe("decoder-396-fp32");
       expect(encoder.plan.handoff).toMatchObject({
         cast: { from: "float16", to: "float32" },
         input: "context",

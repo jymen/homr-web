@@ -64,6 +64,7 @@ import {
   staffRegion,
   staffRegions,
   startRuntime,
+  WEBGPU_DECODER_CATALOG,
 } from "../dist/index.js";
 
 const BATCHES = [8, 16, 32];
@@ -608,9 +609,14 @@ async function showCanvases(cv, detected, page) {
   if (detected.failure !== undefined) {
     return;
   }
+  // ?decoder=webgpu: the re-exported decoder on the WebGPU EP, for the A/B
+  // against wasm that keeps it off the default (MODEL_ROLES.decoder).
+  const decoderOnGpu =
+    new URLSearchParams(window.location.search).get("decoder") === "webgpu";
   const store = new ModelStore({
     baseUrl: MODELS_BASE_URL,
     cache: await browserCache(),
+    ...(decoderOnGpu ? { catalog: WEBGPU_DECODER_CATALOG } : {}),
     runtime,
   });
   try {
