@@ -3,6 +3,9 @@
   "compilerOptions": {
     "noEmit": false,
     "outDir": "dist",
+    // The package ships dist/ without src/, and a map to missing sources makes
+    // every Vite dev server print a warning per module.
+    "sourceMap": false,
     "rootDir": "src",
     // Node's globals must not leak into a browser library, but @webgpu/types
     // declares the GPUAdapter and navigator.gpu that backend.ts probes, so an

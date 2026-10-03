@@ -14,3 +14,7 @@ test/golden/*/meta.json. homr builds on:
   licence 2.0: the transformer.
 
 Their authors ask that research use cite them.
+
+At run time the port loads, as ordinary npm dependencies under their own
+licences: onnxruntime-web (MIT), @techstark/opencv-js, a build of OpenCV
+(Apache licence 2.0), and delaunator (ISC) with robust-predicates (Unlicense).
