@@ -5,12 +5,14 @@ Nothing in homr is patched: the script calls the same functions main.py
 calls, in the same order, on the CPU with the fp32 models, and saves what
 they return. Run twice, it writes byte-identical files.
 
-Four homr functions are unrolled into the calls they make, so that their
+Five homr functions are unrolled into the calls they make, so that their
 intermediate values can be saved: create_noise_grid, detect_staff,
-add_notes_to_staffs and find_braces_brackets_and_grand_staff_lines. Each
+add_notes_to_staffs, find_braces_brackets_and_grand_staff_lines and
+prepare_staff_image. Each
 unrolled block is followed by a call of the real function, and the script
 exits non-zero unless the two results serialise identically."""
 
+import copy
 import hashlib
 import json
 import platform
@@ -69,10 +71,20 @@ from homr.staff_detection import (  # noqa: E402
     resample_staffs,
     sort_staffs_top_to_bottom,
 )
+from homr.image_utils import crop_image_and_return_new_top  # noqa: E402
+from homr.staff_dewarping import (  # noqa: E402
+    calculate_dewarp_transformation,
+    calculate_span_and_optimal_points,
+)
 from homr.staff_parsing import (  # noqa: E402
+    _calculate_region,
+    _dewarp_staff,
     _ensure_same_number_of_staffs,
     _get_number_of_voices,
+    center_image_on_canvas,
+    get_tr_omr_canvas_size,
     prepare_staff_image,
+    remove_black_contours_at_edges_of_image,
 )
 from homr.staff_parsing_tromr import parse_staff_tromr  # noqa: E402
 from homr.staff_position_save_load import save_staff_positions  # noqa: E402
@@ -347,6 +359,51 @@ def unrolled_braces(staffs: list, brace_dot: list):
     return _create_grandstaffs(merged, tall), braces
 
 
+def unrolled_prepare_staff_image(staff, image: np.ndarray, regions: StaffRegions):
+    """prepare_staff_image's calls without the Debug drawing. Returns the
+    canvas, the staff, the intermediates as one dict and the three images
+    between the stages: the crop the transform is built on, the warped crop,
+    and the second crop after remove_black_contours_at_edges_of_image."""
+    region = _calculate_region(staff, regions)
+    image_dimensions = get_tr_omr_canvas_size((int(region[3] - region[1]), int(region[2] - region[0])))
+    scaling_factor = image_dimensions[1] / (region[3] - region[1])
+    resized_size = (int(image.shape[1] * scaling_factor), int(image.shape[0] * scaling_factor))
+    resized = cv2.resize(image, resized_size)
+    scaled_region = np.round(region * scaling_factor)
+    region_step1 = np.array(scaled_region) + np.array([-10, -50, 10, 50])
+    cropped, top_left_step1 = crop_image_and_return_new_top(resized, *region_step1)
+    region_step2 = np.array(scaled_region) - np.array([*top_left_step1, *top_left_step1])
+    top_left = top_left_step1 / scaling_factor
+    staff_in_crop = _dewarp_staff(staff, None, top_left, scaling_factor)
+    span_points, optimal_points = calculate_span_and_optimal_points(staff_in_crop, cropped)
+    dewarp = calculate_dewarp_transformation(
+        cropped, copy.deepcopy(span_points), copy.deepcopy(optimal_points)
+    )
+    tform = dewarp.tform
+    warped = dewarp.dewarp(cropped)
+    second_crop, top_left_step2 = crop_image_and_return_new_top(warped, *region_step2)
+    cleaned = remove_black_contours_at_edges_of_image(second_crop.copy(), staff_in_crop.average_unit_size)
+    canvas = center_image_on_canvas(cleaned, image_dimensions)
+    intermediates = {
+        "region": region,
+        "imageDimensions": image_dimensions,
+        "scalingFactor": scaling_factor,
+        "resizedSize": resized_size,
+        "scaledRegion": scaled_region,
+        "regionStep1": region_step1,
+        "topLeftStep1": top_left_step1,
+        "regionStep2": region_step2,
+        "topLeftStep2": top_left_step2,
+        "spanPoints": span_points,
+        "optimalPoints": optimal_points,
+        "src": tform.src_points,
+        "dst": tform.dst_points,
+        "simplices": tform.triangulation.simplices,
+        "affine": tform.affine_matrices,
+    }
+    return canvas, staff_in_crop, intermediates, cropped, warped, cleaned
+
+
 def golden_dir_for(image_path: Path) -> Path:
     """Private pages live in test/fixtures/local/ and their golden data in
     test/golden/local/; both are git-ignored. Everything else is public."""
@@ -468,9 +525,17 @@ def dump(image_path: Path, config: Config) -> None:
     for voice in range(number_of_voices):
         result_for_voice: list[EncodedSymbol] = []
         for staff in [s.staffs[voice] for s in staffs_for_parsing]:
+            unrolled = unrolled_prepare_staff_image(staff, predictions.preprocessed, regions)
             staff_image, transformed_staff = prepare_staff_image(
                 debug, index, staff, predictions.preprocessed, regions=regions
             )
+            if not np.array_equal(unrolled[0], staff_image):
+                raise SystemExit("prepare_staff_image: the unrolled canvas differs")
+            require_same("prepare_staff_image", unrolled[1], transformed_staff)
+            write_json(out / f"dewarp-{index}.json", unrolled[2])
+            write_gray(out / f"dewarp-{index}-input.png", unrolled[3])
+            write_gray(out / f"dewarp-{index}-warped.png", unrolled[4])
+            write_gray(out / f"dewarp-{index}-cleaned.png", unrolled[5])
             write_gray(out / f"canvas-{index}.png", staff_image)
             write_json(out / f"canvas-{index}-staff.json", transformed_staff)
             tokens = parse_staff_tromr(staff_image=staff_image, staff=transformed_staff, config=config)

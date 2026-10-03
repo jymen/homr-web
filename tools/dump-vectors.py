@@ -14,12 +14,16 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+from PIL import Image
 
 from homr import find_peaks as homr_find_peaks
 from homr.bounding_boxes import BoundingEllipse, RotatedBoundingBox
 from homr.brace_dot_detection import _merge_multi_staff_if_they_share_a_staff
 from homr.model import MultiStaff, Staff, StaffPoint, StemDirection
 from homr.note_detection import NoteheadWithStem, add_notes_to_staffs, adjust_bbox, check_bbox_size
+from homr.staff_dewarping import calculate_dewarp_transformation, calculate_span_and_optimal_points
+from homr.staff_parsing import _ensure_same_number_of_staffs, get_tr_omr_canvas_size
+from homr.staff_regions import StaffRegions
 from homr.staff_detection import (
     RawStaff,
     StaffAnchor,
@@ -1437,6 +1441,127 @@ def dump_grand_staffs() -> None:
     )
 
 
+# staff-regrouping.json, dewarp-points.json and dewarp-warp.json (phase 6)
+
+
+def regrouping_case(name: str, height: int, systems: list[list[Staff]]):
+    staffs = [staff for system in systems for staff in system]
+    multi_staffs = [MultiStaff(system, []) for system in systems]
+    regions = StaffRegions(multi_staffs)
+    probes = sorted({staff.min_y for staff in staffs} | {staff.max_y for staff in staffs} | {0.0, 1e6})
+    result = _ensure_same_number_of_staffs(multi_staffs, np.zeros((height, 1), dtype=np.uint8))
+    return {
+        "name": name,
+        "height": height,
+        "staffs": staffs,
+        "systems": [[staffs.index(s) for s in system] for system in systems],
+        "result": [[next(i for i, t in enumerate(staffs) if t is s) for s in ms.staffs] for ms in result],
+        "regions": [
+            [y, regions.get_start_of_closest_staff_above(y), regions.get_start_of_closest_staff_below(y)]
+            for y in probes
+        ],
+    }
+
+
+def dump_staff_regrouping() -> None:
+    def at(top: float, min_x: float = 100.0) -> Staff:
+        return flat_staff(top, min_x=min_x)
+
+    cases = [
+        regrouping_case("all systems hold one staff", 2000, [[at(100)], [at(400)], [at(700)]]),
+        regrouping_case("all systems hold two", 2000, [[at(100), at(250)], [at(500), at(650)]]),
+        regrouping_case("first system odd, its min_x near 0", 2000, [[at(100, 20.0)], [at(400), at(550)], [at(800), at(950)]]),
+        regrouping_case("first system odd, far from the edge", 2000, [[at(100)], [at(400), at(550)], [at(800), at(950)]]),
+        regrouping_case("last system odd, height minus max_x near 0", 530, [[at(100), at(250)], [at(500), at(650)], [at(900)]]),
+        regrouping_case("two systems that differ", 2000, [[at(500), at(650)], [at(100)]]),
+        regrouping_case("a middle system odd", 2000, [[at(100), at(250)], [at(500)], [at(800), at(950)]]),
+    ]
+    sizes = [[h, w, get_tr_omr_canvas_size((h, w))] for h, w in [(200, 1000), (256, 1280), (257, 1280), (300, 1000), (150, 1500), (1, 3), (333, 1777)]]
+    write_vectors(
+        "staff-regrouping",
+        cases + [{"name": "get_tr_omr_canvas_size", "sizes": sizes}],
+        systems="indices into staffs; result is _ensure_same_number_of_staffs as the same indices",
+        regions="[y, get_start_of_closest_staff_above(y), get_start_of_closest_staff_below(y)]",
+    )
+
+
+def curved_staff(width: int, mid: float, amplitude: float, period: float, unit: float = 12.0, start: float = 30.0) -> Staff:
+    xs = np.arange(start, width - start + 1, 10.0)
+    return staff_of([
+        (float(x), [mid - 2 * unit + unit * i + amplitude * float(np.sin(2 * np.pi * x / period)) for i in range(5)], 0.0)
+        for x in xs
+    ])
+
+
+def points_case(name: str, staff: Staff, width: int, height: int):
+    image = np.zeros((height, width), dtype=np.uint8)
+    span, optimal = calculate_span_and_optimal_points(staff, image)
+    case = {"name": name, "width": width, "height": height, "staff": staff, "span": span, "optimal": optimal}
+    if span:
+        tform = calculate_dewarp_transformation(image, [list(r) for r in span], [list(r) for r in optimal]).tform
+        case.update(src=tform.src_points, dst=tform.dst_points, simplices=tform.triangulation.simplices, affine=tform.affine_matrices)
+    return case
+
+
+def dump_dewarp_points() -> None:
+    zero_first = staff_of([(x, [-24.0, -12.0, 0.0 if x < 15 else 3.0, 12.0, 24.0], 0.0) for x in np.arange(0.0, 700.0, 10.0)])
+    cases = [
+        points_case("straight", curved_staff(700, 80.0, 0.0, 600.0), 700, 160),
+        points_case("sloped down", staff_of([(float(x), five(40.0 + 0.05 * x, 12.0), 0.0) for x in np.arange(30.0, 671.0, 10.0)]), 700, 160),
+        points_case("curved, 4 px", curved_staff(700, 80.0, 4.0, 600.0), 700, 160),
+        points_case("curved, 12 px", curved_staff(700, 80.0, 12.0, 450.0), 700, 160),
+        points_case("first middle line at y = 0", zero_first, 700, 160),
+        points_case("staff covers part of the width", curved_staff(700, 80.0, 6.0, 500.0, start=250.0), 700, 160),
+        points_case("too short for six rows", curved_staff(300, 3.0, 0.0, 600.0), 300, 5),
+        points_case("too few points per row", curved_staff(170, 80.0, 0.0, 600.0, start=10.0), 170, 160),
+    ]
+    write_vectors(
+        "dewarp-points",
+        cases,
+        transform="src, dst, simplices and affine of calculate_dewarp_transformation, when span is not empty",
+    )
+
+
+def staff_picture(staff: Staff, width: int, height: int) -> np.ndarray:
+    image = np.full((height, width), 230, dtype=np.uint8)
+    for a, b in zip(staff.grid, staff.grid[1:]):
+        for ya, yb in zip(a.y, b.y):
+            cv2.line(image, (int(a.x), int(round(ya))), (int(b.x), int(round(yb))), 20, 2)
+    for i, point in enumerate(staff.grid[::5]):
+        cv2.ellipse(image, (int(point.x), int(round(point.y[i % 5]))), (7, 5), -20, 0, 360, 10, -1)
+    return image
+
+
+def dump_dewarp_warp() -> None:
+    cases = []
+    for name, amplitude, period in [("curved, 4 px", 4.0, 600.0), ("curved, 12 px", 12.0, 450.0)]:
+        width, height = 700, 160
+        staff = curved_staff(width, 80.0, amplitude, period)
+        image = staff_picture(staff, width, height)
+        span, optimal = calculate_span_and_optimal_points(staff, image)
+        dewarp = calculate_dewarp_transformation(image, span, optimal)
+        warped = dewarp.dewarp(image)
+        stem = f"dewarp-warp-{int(amplitude)}px"
+        Image.fromarray(image).save(VECTORS / f"{stem}-input.png", optimize=True)
+        Image.fromarray(warped).save(VECTORS / f"{stem}-warped.png", optimize=True)
+        tform = dewarp.tform
+        probes = [(float(x), float(y)) for x in (0.0, 5.5, 82.0, 350.25, 699.0, 700.0) for y in (0.0, 20.0, 80.5, 159.0)]
+        cases.append({
+            "name": name,
+            "input": f"{stem}-input.png",
+            "warped": f"{stem}-warped.png",
+            "src": tform.src_points,
+            "dst": tform.dst_points,
+            "simplices": tform.triangulation.simplices,
+            "probes": [[p, tform.triangulation.find_simplex(np.array([p]))[0], tform.transform_point(p)] for p in probes],
+        })
+    write_vectors(
+        "dewarp-warp",
+        cases,
+        probes="[point, find_simplex(point), transform_point(point)]",
+    )
+
+
 DUMPERS = {
     "pairwise": dump_pairwise,
     "floor-div": dump_floor_div,
@@ -1459,6 +1584,9 @@ DUMPERS = {
     "braces-units": dump_braces_units,
     "multi-staff-merge": dump_multi_staff_merge,
     "grand-staffs": dump_grand_staffs,
+    "staff-regrouping": dump_staff_regrouping,
+    "dewarp-points": dump_dewarp_points,
+    "dewarp-warp": dump_dewarp_warp,
 }
 
 

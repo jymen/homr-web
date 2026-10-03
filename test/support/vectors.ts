@@ -28,6 +28,8 @@ export const VECTOR_FILES = [
   "braces-units",
   "connect-lines",
   "connect-lines-cleanup",
+  "dewarp-points",
+  "dewarp-warp",
   "edge-of-vision",
   "find-anchors",
   "find-peaks",
@@ -43,6 +45,7 @@ export const VECTOR_FILES = [
   "raw-staff-merge",
   "resample",
   "staff-merge",
+  "staff-regrouping",
 ] as const;
 
 export type VectorFile = (typeof VECTOR_FILES)[number];
@@ -559,6 +562,76 @@ const VECTOR_CHECKS: Record<VectorFile, VectorCheck> = {
       }
     },
     keys: ["name", "a", "b"],
+  },
+  "staff-regrouping": {
+    check: (one, at) => {
+      if ("sizes" in one) {
+        for (const size of list(one.sizes, `${at}.sizes`)) {
+          need(
+            Array.isArray(size) && size.length === 3,
+            `${at}.sizes: [height, width, [w, h]]`
+          );
+        }
+        return;
+      }
+      const staffs = decodeStaffs(one.staffs, `${at}.staffs`);
+      for (const key of ["systems", "result"]) {
+        for (const system of list(one[key], `${at}.${key}`)) {
+          need(
+            numberList(system, `${at}.${key}`).every(
+              (i) => isInteger(i) && i < staffs.length
+            ),
+            `${at}.${key}: an index outside staffs`
+          );
+        }
+      }
+      for (const probe of list(one.regions, `${at}.regions`)) {
+        numberList(probe, `${at}.regions`, 3);
+      }
+    },
+    keys: ["name"],
+  },
+  "dewarp-points": {
+    check: (one, at) => {
+      decodeStaff(one.staff, {}, `${at}.staff`);
+      need(
+        isInteger(one.width) && isInteger(one.height),
+        `${at}: width and height`
+      );
+      const rows = list(one.span, `${at}.span`);
+      need(
+        list(one.optimal, `${at}.optimal`).length === rows.length,
+        `${at}.optimal: one row per span row`
+      );
+      if (rows.length > 0) {
+        const count = list(one.src, `${at}.src`).length;
+        need(
+          list(one.dst, `${at}.dst`).length === count,
+          `${at}.dst: one point per src point`
+        );
+        need(
+          list(one.affine, `${at}.affine`).length ===
+            list(one.simplices, `${at}.simplices`).length,
+          `${at}.affine: one matrix or null per simplex`
+        );
+      }
+    },
+    keys: ["name", "staff", "width", "height", "span", "optimal"],
+  },
+  "dewarp-warp": {
+    check: (one, at) => {
+      need(
+        typeof one.input === "string" && typeof one.warped === "string",
+        `${at}: input and warped name PNG files`
+      );
+      for (const probe of list(one.probes, `${at}.probes`)) {
+        need(
+          Array.isArray(probe) && probe.length === 3,
+          `${at}.probes: [point, simplex, transformed]`
+        );
+      }
+    },
+    keys: ["name", "input", "warped", "src", "dst", "simplices", "probes"],
   },
 };
 
