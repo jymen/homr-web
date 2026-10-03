@@ -107,3 +107,32 @@ export function sameSymbol(a: EncodedSymbol, b: EncodedSymbol): boolean {
     a.position === b.position
   );
 }
+
+const TUPLET_RHYTHM = /^(note|rest)_(\d+)(.*)/;
+
+/**
+ * EncodedSymbol.remove_tuplet: a duration divisible by 3, 5 or 7 (tested in
+ * that order) is scaled back to the plain value it subdivides.
+ */
+export function removeTuplet(symbol: EncodedSymbol): EncodedSymbol {
+  const match = symbol.rhythm.match(TUPLET_RHYTHM);
+  if (!match) {
+    return symbol;
+  }
+  const [, kind, digits, tail] = match;
+  let duration = Number.parseInt(digits ?? "", 10);
+  if (duration % 3 === 0) {
+    duration = Math.floor(duration / 3) * 2;
+  } else if (duration % 5 === 0) {
+    duration = Math.floor(duration / 5) * 4;
+  } else if (duration % 7 === 0) {
+    duration = Math.floor(duration / 7) * 4;
+  } else {
+    return symbol;
+  }
+  return { ...symbol, rhythm: `${kind}_${duration}${tail}` };
+}
+
+/** EncodedSymbol.to_upper_position. */
+export const toUpperPosition = (symbol: EncodedSymbol): EncodedSymbol =>
+  symbol.position === "lower" ? { ...symbol, position: "upper" } : symbol;
