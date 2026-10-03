@@ -15,6 +15,8 @@
  * homr's own output on a page next to the port's.
  */
 
+import type { Triangle } from "../dewarp/delaunay.js";
+import type { AffineMatrix } from "../dewarp/piecewise-affine.js";
 import {
   type AxisBox,
   assertNormalizedRect,
@@ -1362,5 +1364,119 @@ export function decodeNoise(json: unknown, path = "$"): GoldenNoise {
     outcome,
     tile: { height: tileHeight, width: tileWidth },
     total,
+  };
+}
+
+// dewarp-<n>.json (phase 6)
+
+/** The four corners homr writes as [x1, y1, x2, y2]. */
+export type GoldenCorners = readonly [number, number, number, number];
+
+/** What tools/dump-golden.py's unrolled prepare_staff_image saved for one canvas. */
+export interface GoldenDewarp {
+  readonly affine: readonly (AffineMatrix | null)[];
+  readonly dst: readonly Point[];
+  /** get_tr_omr_canvas_size: [width, height]. */
+  readonly imageDimensions: readonly [number, number];
+  readonly optimalPoints: readonly (readonly Point[])[];
+  readonly region: GoldenCorners;
+  readonly regionStep1: GoldenCorners;
+  readonly regionStep2: GoldenCorners;
+  /** (width, height) handed to cv2.resize. */
+  readonly resizedSize: readonly [number, number];
+  readonly scaledRegion: GoldenCorners;
+  readonly scalingFactor: number;
+  readonly simplices: readonly Triangle[];
+  readonly spanPoints: readonly (readonly Point[])[];
+  readonly src: readonly Point[];
+  readonly topLeftStep1: Point;
+  readonly topLeftStep2: Point;
+}
+
+function regionCornersOf(value: unknown, path: string): GoldenCorners {
+  const [x1, y1, x2, y2, ...rest] = numbers(value, path);
+  if (
+    x1 === undefined ||
+    y1 === undefined ||
+    x2 === undefined ||
+    y2 === undefined ||
+    rest.length > 0
+  ) {
+    throw new GoldenError(path, "expected four numbers");
+  }
+  return [x1, y1, x2, y2];
+}
+
+const pointsOf = (value: unknown, path: string): Point[] =>
+  asArray(value, path).map((p, i) => pointOf(p, `${path}[${i}]`));
+
+export function decodeDewarp(json: unknown, path = "$"): GoldenDewarp {
+  const object = asObject(json, path);
+  const at = (name: string): unknown => field(object, name, path);
+  const rows = (name: string): Point[][] =>
+    asArray(at(name), `${path}.${name}`).map((row, i) =>
+      pointsOf(row, `${path}.${name}[${i}]`)
+    );
+  const src = pointsOf(at("src"), `${path}.src`);
+  const simplices = asArray(at("simplices"), `${path}.simplices`).map(
+    (value, i): Triangle => {
+      const [a, b, c, ...rest] = numbers(value, `${path}.simplices[${i}]`);
+      if (
+        a === undefined ||
+        b === undefined ||
+        c === undefined ||
+        rest.length > 0 ||
+        ![a, b, c].every((v) => Number.isInteger(v) && v >= 0 && v < src.length)
+      ) {
+        throw new GoldenError(
+          `${path}.simplices[${i}]`,
+          "not three point indices"
+        );
+      }
+      return [a, b, c];
+    }
+  );
+  const affine = asArray(at("affine"), `${path}.affine`).map(
+    (value, i): AffineMatrix | null => {
+      if (value === null) {
+        return null;
+      }
+      const flat = asArray(value, `${path}.affine[${i}]`).flatMap((row, r) =>
+        numbers(row, `${path}.affine[${i}][${r}]`)
+      );
+      const [m0, m1, m2, m3, m4, m5, ...rest] = flat;
+      if (
+        m0 === undefined ||
+        m1 === undefined ||
+        m2 === undefined ||
+        m3 === undefined ||
+        m4 === undefined ||
+        m5 === undefined ||
+        rest.length > 0
+      ) {
+        throw new GoldenError(`${path}.affine[${i}]`, "not a 2 by 3 matrix");
+      }
+      return [m0, m1, m2, m3, m4, m5];
+    }
+  );
+  if (affine.length !== simplices.length) {
+    throw new GoldenError(`${path}.affine`, "one matrix per simplex");
+  }
+  return {
+    affine,
+    dst: pointsOf(at("dst"), `${path}.dst`),
+    imageDimensions: pair(at("imageDimensions"), `${path}.imageDimensions`),
+    optimalPoints: rows("optimalPoints"),
+    region: regionCornersOf(at("region"), `${path}.region`),
+    regionStep1: regionCornersOf(at("regionStep1"), `${path}.regionStep1`),
+    regionStep2: regionCornersOf(at("regionStep2"), `${path}.regionStep2`),
+    resizedSize: pair(at("resizedSize"), `${path}.resizedSize`),
+    scaledRegion: regionCornersOf(at("scaledRegion"), `${path}.scaledRegion`),
+    scalingFactor: asNumber(at("scalingFactor"), `${path}.scalingFactor`),
+    simplices,
+    spanPoints: rows("spanPoints"),
+    src,
+    topLeftStep1: pointOf(at("topLeftStep1"), `${path}.topLeftStep1`),
+    topLeftStep2: pointOf(at("topLeftStep2"), `${path}.topLeftStep2`),
   };
 }

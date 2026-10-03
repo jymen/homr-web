@@ -84,7 +84,9 @@ const REQUIRED_MEMBERS = [
   "ellipse2Poly",
   "erode",
   "findContours",
+  "fillConvexPoly",
   "fitEllipse",
+  "getAffineTransform",
   "getStructuringElement",
   "Mat",
   "matFromArray",
@@ -92,11 +94,13 @@ const REQUIRED_MEMBERS = [
   "minAreaRect",
   "morphologyEx",
   "pointPolygonTest",
+  "resize",
   "PointVector",
   "rotatedRectangleIntersection",
   "Size",
   "subtract",
   "threshold",
+  "warpAffine",
 ] as const;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>

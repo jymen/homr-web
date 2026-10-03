@@ -32,6 +32,7 @@ import type { DecodedSymbol, EncodedSymbol } from "../transformer/symbol.js";
 import {
   decodeBarLines,
   decodeBraces,
+  decodeDewarp,
   decodeEllipses,
   decodeMultiStaffs,
   decodeNoise,
@@ -47,6 +48,7 @@ import {
   decodeTokens,
   decodeVoices,
   type GoldenBraces,
+  type GoldenDewarp,
   GoldenError,
   type GoldenNoise,
   type GoldenNoteheadSplit,
@@ -65,6 +67,8 @@ export interface GoldenPng {
   readonly rgba: Uint8Array;
   readonly width: number;
 }
+
+export type GoldenDewarpStage = "input" | "warped" | "cleaned";
 
 export interface GoldenReader {
   readonly png: (name: string) => GoldenPng;
@@ -122,6 +126,10 @@ export interface GoldenPage {
   readonly canvasStaff: (index: number) => Staff;
   /** mask-denoised-staff.png: the staff mask after filter_predictions, before make_lines_stronger. */
   readonly denoisedStaffMask: () => Mask;
+  /** dewarp-<n>.json: prepare_staff_image's intermediates for canvas n. */
+  readonly dewarp: (index: number) => GoldenDewarp;
+  /** dewarp-<n>-<stage>.png: the first crop, the warped crop, the cleaned second crop. */
+  readonly dewarpImage: (index: number, stage: GoldenDewarpStage) => GrayImage;
   /** mask-<name>.png, or mask-filtered-<name>.png (after noise filtering and make_lines_stronger). */
   readonly mask: (name: MaskClass, filtered?: boolean) => Mask;
   readonly meta: () => GoldenMeta;
@@ -346,6 +354,11 @@ export function createGoldenPage(reader: GoldenReader): GoldenPage {
       )
     ),
     denoisedStaffMask: () => maskOf("mask-denoised-staff.png"),
+    dewarp: memoBy((index: number) =>
+      decodeDewarp(json(`dewarp-${index}.json`), `dewarp-${index}.json`)
+    ),
+    dewarpImage: (index: number, stage: GoldenDewarpStage) =>
+      gray(`dewarp-${index}-${stage}.png`),
     mask: (name: MaskClass, filtered = false) =>
       maskOf(
         `mask-${filtered ? "filtered-" : ""}${MASK_CLASSES[name].golden}.png`

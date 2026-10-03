@@ -31,7 +31,9 @@ const PORT_MEMBERS = [
   "ellipse2Poly",
   "erode",
   "findContours",
+  "fillConvexPoly",
   "fitEllipse",
+  "getAffineTransform",
   "getStructuringElement",
   "Mat",
   "matFromArray",
@@ -40,10 +42,12 @@ const PORT_MEMBERS = [
   "morphologyEx",
   "pointPolygonTest",
   "PointVector",
+  "resize",
   "rotatedRectangleIntersection",
   "Size",
   "subtract",
   "threshold",
+  "warpAffine",
 ];
 
 const countingSource = (counter: { calls: number }): OpenCvSource => {
@@ -82,6 +86,7 @@ describe("loadOpenCv", () => {
     "getStructuringElement",
     "rotatedRectangleIntersection",
     "subtract",
+    "warpAffine",
   ])("refuses a build with no %s, and names it", async (name) => {
     vi.resetModules();
     const fresh = await import("../src/cv/opencv.js");
