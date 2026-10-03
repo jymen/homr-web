@@ -2,8 +2,16 @@
 
 import { describe, expect, it } from "vitest";
 import { createStaff, createStaffPoint } from "../src/model/staff.js";
-import { formatStaffPositions } from "../src/pipeline/staff-positions.js";
-import { goldenPageOf, listGoldenFixtures } from "./support/golden.js";
+import {
+  formatStaffPositions,
+  staffBoxes,
+  staffPositions,
+} from "../src/pipeline/staff-positions.js";
+import {
+  goldenPageOf,
+  listGoldenFixtures,
+  readerFor,
+} from "./support/golden.js";
 
 for (const fixture of listGoldenFixtures()) {
   const page = goldenPageOf(fixture);
@@ -16,8 +24,37 @@ for (const fixture of listGoldenFixtures()) {
         formatStaffPositions(page.multiStaffs(), page.preprocessed())
       ).toBe(want);
     });
+
+    it("gives the app server's staves.json, parsed by its own Go code", () => {
+      const want: unknown = JSON.parse(readerFor(fixture).text("staves.json"));
+      expect(
+        staffBoxes(staffPositions(page.multiStaffs(), page.preprocessed()))
+      ).toEqual(want);
+    });
   });
 }
+
+describe("staffBoxes", () => {
+  it("sorts by cy stably and numbers after the sort", () => {
+    const at = (cy: number, cx: number) => ({
+      cx,
+      cy,
+      h: 0.1,
+      isGrandstaff: false,
+      w: 0.5,
+    });
+    expect(
+      staffBoxes([at(0.5, 1), at(0.2, 2), at(0.5, 3)]).map((b) => [
+        b.index,
+        b.cx,
+      ])
+    ).toEqual([
+      [0, 2],
+      [1, 1],
+      [2, 3],
+    ]);
+  });
+});
 
 describe("formatStaffPositions", () => {
   it("writes nothing for no staff", () => {
