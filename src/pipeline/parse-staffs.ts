@@ -95,9 +95,7 @@ export async function parseStaffs(
       const staff = system.staffs[voice];
       if (staff !== undefined) {
         const canvas = prepareStaffImage(cv, staff, page, regions);
-        // One staff at a time, as homr does: the decoder holds its caches
-        // for the whole of a staff, and the WebAssembly arena is shared.
-        // biome-ignore lint/performance/noAwaitInLoops: sequential by design
+        // biome-ignore lint/performance/noAwaitInLoops: one staff at a time, as homr does; the sessions share one WebAssembly arena
         staffs.push(await parseStaffCanvas(sessions, canvas, options));
       }
     }

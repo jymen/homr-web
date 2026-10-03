@@ -181,8 +181,7 @@ export async function runDecoder(
   try {
     while (state.step < MAX_SEQ_LEN) {
       options.signal?.throwIfAborted();
-      // Each step feeds the previous step's argmax: the loop is sequential by construction.
-      // biome-ignore lint/performance/noAwaitInLoops: autoregressive decoding
+      // biome-ignore lint/performance/noAwaitInLoops: each step feeds the previous step's argmax
       const symbol = await state.next();
       options.onStep?.(state.step);
       if (symbol === null) {

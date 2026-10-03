@@ -7,8 +7,8 @@
  * golden dumper writes from the installed homr; a re-pin regenerates them
  * and shows as a diff. test/golden.test.ts compares them index for index.
  *
- * Phase 7 adds the rest of vocabulary.py (durations, tuplet cleanup,
- * remove_duplicated_symbols) beside this file.
+ * The rest of vocabulary.py that parse_staffs reaches is in duration.ts,
+ * symbol.ts and remove-duplicated-symbols.ts.
  */
 
 /** The "nonote" sentinel: the head has nothing to say for this symbol. */
