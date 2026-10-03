@@ -41,12 +41,14 @@ export const VECTOR_FILES = [
   "line-peak-groups",
   "multi-staff-merge",
   "noise",
+  "normalize",
   "notehead-clumps",
   "pairwise",
   "raw-staff-merge",
   "resample",
   "staff-merge",
   "staff-regrouping",
+  "vocabulary-cleanup",
 ] as const;
 
 export type VectorFile = (typeof VECTOR_FILES)[number];
@@ -527,6 +529,17 @@ const VECTOR_CHECKS: Record<VectorFile, VectorCheck> = {
       "mask",
     ],
   },
+  normalize: {
+    check: (one, at) => {
+      need(
+        isInteger(one.pixel) &&
+          isNumber(one.float32) &&
+          isInteger(one.float16Bits),
+        `${at}: expected pixel, float32 and float16Bits`
+      );
+    },
+    keys: ["pixel", "float32", "float16Bits"],
+  },
   "notehead-clumps": {
     check: (one, at) => {
       maskSize(one.mask, `${at}.mask`);
@@ -645,7 +658,36 @@ const VECTOR_CHECKS: Record<VectorFile, VectorCheck> = {
     },
     keys: ["name"],
   },
+  "vocabulary-cleanup": {
+    check: (one, at) => {
+      need(
+        ["duration", "priorPowerOfTwo", "remove", "tuplet"].includes(
+          String(one.kind)
+        ),
+        `${at}.kind: unknown`
+      );
+      if (one.kind === "remove") {
+        symbolRows(one.symbols, `${at}.symbols`);
+        symbolRows(one.result, `${at}.result`);
+      }
+    },
+    keys: ["kind"],
+  },
 };
+
+/** vocabulary-cleanup.json's symbols: [rhythm, pitch, lift, articulation, slur, position], or a prefix of it. */
+export function symbolRows(value: unknown, at: string): string[][] {
+  return list(value, at).map((row, i) => {
+    const fields = list(row, `${at}[${i}]`);
+    need(
+      fields.length >= 1 &&
+        fields.length <= 6 &&
+        fields.every((f) => typeof f === "string"),
+      `${at}[${i}]: expected one to six strings`
+    );
+    return fields as string[];
+  });
+}
 
 /** Throws unless the case has the keys and the value shapes its file promises. */
 export function checkVectorCase(

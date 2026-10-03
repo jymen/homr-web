@@ -43,6 +43,9 @@ from homr.staff_detection import (
     resample_staff,
 )
 
+from homr.transformer.staff2score import ConvertToArray  # noqa: E402
+from homr.transformer.vocabulary import EncodedSymbol, prior_power_of_two, remove_duplicated_symbols  # noqa: E402
+
 ROOT = Path(__file__).resolve().parent.parent
 VECTORS = ROOT / "test" / "golden" / "vectors"
 
@@ -1602,6 +1605,80 @@ def dump_black_contours() -> None:
     write_vectors("black-contours", cases, image="rows of gray values", unitSize="the threshold is 2 * unitSize")
 
 
+# vocabulary-cleanup.json
+
+
+def symbol_of(fields: list[str]) -> EncodedSymbol:
+    rhythm, pitch, lift, articulation, slur, position = (fields + [".", ".", ".", ".", "."])[:6]
+    return EncodedSymbol(rhythm, pitch, lift, articulation, slur, position)
+
+
+def fields_of(symbol: EncodedSymbol) -> list[str]:
+    return [symbol.rhythm, symbol.pitch, symbol.lift, symbol.articulation, symbol.slur, symbol.position]
+
+
+def note(rhythm: str, pitch: str = "C4", position: str = "upper") -> list[str]:
+    return [rhythm, pitch, "_", "_", "_", position]
+
+
+def dump_vocabulary_cleanup() -> None:
+    bar = ["barline"]
+    nl = ["newline"]
+    chord = ["chord"]
+    quarters = [note("note_4"), note("note_4", "D4"), note("note_4", "E4"), note("note_4", "F4"), bar]
+    lists = {
+        "leading chord token": [chord, note("note_4"), note("note_8", "D4"), note("note_4", "E4")],
+        "chord with a longer duplicate pitch": [note("note_8"), chord, note("note_4"), chord, note("note_8", "E4"), bar],
+        "chord with a shorter duplicate pitch": [note("note_4"), chord, note("note_8"), bar],
+        "duplicate pitch on two positions": [note("note_4"), chord, note("note_4", "C4", "lower"), bar],
+        "chord led by a clef": [["clef_G2", "_", "_", "_", "_", "upper"], chord, ["clef_G2", "_", "_", "_", "_", "upper"], note("note_4")],
+        "short measure loses its tuplets": quarters + quarters + [note("note_6"), note("note_6", "D4"), note("note_6", "E4"), bar] + quarters,
+        "measure at the typical length keeps its tuplets": quarters + [note("note_12"), note("note_12", "D4"), note("note_12", "E4"), note("note_4"), note("note_4"), note("note_4"), bar],
+        "fives and sevens": [note("note_20"), note("note_28"), note("note_7"), note("rest_10"), note("note_11"), bar] + quarters + quarters,
+        "even measure count takes the upper median": quarters + [note("note_2"), note("note_2"), note("note_2"), bar] + [note("note_6"), bar] + [note("note_2"), note("note_2"), bar],
+        "lower clef early keeps lower": [["clef_G2", "_", "_", "_", "_", "upper"], chord, ["clef_F4", "_", "_", "_", "_", "lower"], note("note_4", "C3", "lower"), bar],
+        "lower clef too late moves everything up": [note("note_4", "C4", "lower")] * 5 + [["clef_F4", "_", "_", "_", "_", "lower"], note("note_4", "C3", "lower"), bar],
+        "redundant clefs keys and times across staffs": [
+            ["clef_G2", "_", "_", "_", "_", "upper"], ["keySignature_1"], ["timeSignature/8"], note("note_8"), bar, nl,
+            ["clef_G2", "_", "_", "_", "_", "upper"], ["keySignature_1"], ["timeSignature/8"], note("note_8"), bar, nl,
+            ["clef_G2", "_", "_", "_", "_", "upper"], ["keySignature_2"], ["timeSignature/4"], ["clef_C3", "_", "_", "_", "_", "upper"], note("note_8"), bar,
+        ],
+        "clef chord emptied by the redundancy filter": [["clef_G2", "_", "_", "_", "_", "upper"], note("note_4"), ["clef_G2", "_", "_", "_", "_", "upper"], chord, ["clef_G2", "_", "_", "_", "_", "upper"], note("note_4")],
+        "lower clef slot": [["clef_F4", "_", "_", "_", "_", "lower"], ["clef_F4", "_", "_", "_", "_", "."], ["clef_F4", "_", "_", "_", "_", "lower"], ["clef_G2", "_", "_", "_", "_", "lower"]],
+        "grace notes and multirests": [note("note_8G"), note("note_4"), bar, ["rest_2m", "_", "_", "_", "_", "upper"], bar, note("note_4"), note("note_4"), bar, note("note_16G."), chord, note("note_4", "E4"), bar],
+        "repeat ends a measure": [note("note_6")] * 3 + [["repeatEnd"]] + quarters + quarters,
+        "empty": [],
+    }
+    cases = []
+    for name, symbols in lists.items():
+        built = [symbol_of(s) for s in symbols]
+        for cleanup in (True, False):
+            out = remove_duplicated_symbols(built, cleanup_tuplets=cleanup)
+            cases.append({"kind": "remove", "name": name, "cleanupTuplets": cleanup,
+                          "symbols": symbols, "result": [fields_of(s) for s in out]})
+    for rhythm in ["note_4", "note_6", "note_12.", "rest_24G", "note_20", "note_10", "note_28", "note_7", "note_14", "note_11", "rest_96", "rest_2m", "clef_G2", "note_15"]:
+        cases.append({"kind": "tuplet", "rhythm": rhythm, "result": EncodedSymbol(rhythm).remove_tuplet().rhythm})
+    for rhythm in ["note_4", "note_4.", "note_4..", "note_8G", "note_0", "note_0.", "rest_12", "note_6.", "note_3", "rest_2m", "rest_10m", "note_96", "note_7", "note_1", "note_128..", "note_16G..", "clef_G2", "barline"]:
+        d = EncodedSymbol(rhythm).get_duration()
+        cases.append({"kind": "duration", "rhythm": rhythm, "fraction": [d.fraction.numerator, d.fraction.denominator],
+                      "dots": d.dots, "actualNotes": d.actual_notes, "normalNotes": d.normal_notes, "kern": d.kern,
+                      "base": [d.base_duration.numerator, d.base_duration.denominator]})
+    for n in [-3, 0, 1, 2, 3, 7, 8, 9, 96, 129]:
+        cases.append({"kind": "priorPowerOfTwo", "n": n, "result": prior_power_of_two(n)})
+    write_vectors("vocabulary-cleanup", cases, symbols="[rhythm, pitch, lift, articulation, slur, position], missing fields '.'")
+
+
+# normalize.json
+
+
+def dump_normalize() -> None:
+    pixels = np.arange(256, dtype=np.uint8).reshape(1, 256)
+    as32 = ConvertToArray()(pixels).reshape(-1)
+    as16 = as32.astype(np.float16).view(np.uint16)
+    cases = [{"pixel": int(p), "float32": float(a), "float16Bits": int(b)} for p, a, b in zip(range(256), as32, as16, strict=True)]
+    write_vectors("normalize", cases, source="staff2score.ConvertToArray, then astype(float16) as encoder_inference.py does")
+
+
 DUMPERS = {
     "pairwise": dump_pairwise,
     "floor-div": dump_floor_div,
@@ -1628,6 +1705,8 @@ DUMPERS = {
     "dewarp-points": dump_dewarp_points,
     "dewarp-warp": dump_dewarp_warp,
     "black-contours": dump_black_contours,
+    "vocabulary-cleanup": dump_vocabulary_cleanup,
+    "normalize": dump_normalize,
 }
 
 
