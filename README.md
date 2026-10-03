@@ -53,6 +53,7 @@ with `ok: false` and one of these codes in `error`:
 | `busy` | this recognizer is still reading another page |
 | `cancelled` | the signal was aborted, or the recognizer disposed |
 | `timeout` | the signal was aborted with a `TimeoutError`, as `AbortSignal.timeout()` does |
+| `worker_lost` | the Worker crashed; this recognizer answers only this from now on, so dispose it and create another |
 
 The result has the shape of the AbcMusicStudio server's homr route (`engine`,
 `ok`, `error`, `musicXml`, `log`, `durationMs`, `staves`, `texts`) plus
@@ -60,14 +61,18 @@ The result has the shape of the AbcMusicStudio server's homr route (`engine`,
 
 Progress arrives in stages: `models` (bytes of the three models, on the first
 page only), `segment` (tiles), `detect`, `dewarp` and `staff` (one each per
-staff), and `xml`. On an Apple M-series laptop with WebGPU a page takes 5 to
+staff), and `xml`. On a first page `models` appears twice, before `segment`
+for the segmentation model and after `detect` for the transformer, and a
+page that is not music never downloads the transformer. On an Apple M-series laptop with WebGPU a page takes 5 to
 7 seconds once the models are cached. Under Node on one WebAssembly thread it
 takes about 40 seconds; WebAssembly threads in a browser were not timed. The models are about 100 MB on WebGPU and 160 MB on WebAssembly,
 downloaded on the first page and cached by the browser after that.
 
-`createRecognizer` rejects only when the Worker cannot start, for example
-when the browser has no module Workers. One recognizer reads one page at a
-time; read the pages of a PDF one after another.
+`createRecognizer` rejects when the Worker cannot start, for example when
+the browser has no module Workers, or when it has not answered within 30
+seconds. One recognizer reads one page at a time; read the pages of a PDF one
+after another. A page asked for right after a cancel is accepted and starts
+once the Worker has finished the cancelled page's current step.
 
 Options: `baseUrl` (required), `prefer` (the best backend to try, default
 `"webgpu"`), `wasmPaths` (where onnxruntime-web's `.wasm` and `.mjs` files
@@ -89,8 +94,10 @@ export default defineConfig({
 });
 ```
 
-That configuration was checked with a fresh `npm create vite` project, in
-`vite dev` and in `vite build` with `vite preview`. For a bundler that cannot
+That configuration was checked with a fresh `npm create vite` project (Vite
+8.3), in `vite dev`, where Vite pre-bundled homr-web itself and the Worker
+still resolved, and in `vite build` with `vite preview`. Not yet checked
+under SvelteKit. For a bundler that cannot
 resolve the Worker URL, pass your own Worker:
 `createRecognizer({ baseUrl, createWorker: () => new Worker(url, { type: "module" }) })`,
 where `url` serves the `homr-web/worker` entry.

@@ -124,6 +124,25 @@ describe("recognizePage's failures are results", () => {
     ).toBe("timeout");
     expect(opened).toEqual([]);
   });
+
+  it("hands the page's signal to every model it opens", async () => {
+    const signals: (AbortSignal | undefined)[] = [];
+    const controller = new AbortController();
+    await recognizePage(
+      page(),
+      {
+        backend: "wasm",
+        cv: await testOpenCv(),
+        open: (_role, _batch, signal) => {
+          signals.push(signal);
+          controller.abort();
+          return Promise.reject(new ModelError("fetch-failed", "aborted"));
+        },
+      },
+      { signal: controller.signal }
+    );
+    expect(signals).toEqual([controller.signal]);
+  });
 });
 
 function firstFixture() {

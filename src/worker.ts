@@ -60,8 +60,15 @@ export const startBrowserEngine: StartEngine = async (settings, onModel) => {
   const engine = {
     backend: runtime.backend,
     cv,
-    open: (role: Parameters<ModelStore["open"]>[0], batch?: number) =>
-      store.open(role, batch === undefined ? {} : { batch }),
+    open: async (
+      role: Parameters<ModelStore["open"]>[0],
+      batch?: number,
+      signal?: AbortSignal
+    ) => {
+      // Bytes first, under the page's signal, so a cancel stops a download.
+      await store.prefetch([role], signal);
+      return await store.open(role, batch === undefined ? {} : { batch });
+    },
   };
   return {
     close: () => store.close(),
@@ -209,8 +216,27 @@ export class WorkerHost {
           this.#post({ id, kind: "progress", progress }),
         signal: job.controller.signal,
       })
+      .catch((cause: unknown) =>
+        failedResult(
+          state.engine.report.backend,
+          "engine_failed",
+          describeError(cause)
+        )
+      )
       .then((result) => {
-        this.#post({ id, kind: "result", result });
+        try {
+          this.#post({ id, kind: "result", result });
+        } catch (cause) {
+          this.#post({
+            id,
+            kind: "result",
+            result: failedResult(
+              result.backend,
+              "engine_failed",
+              describeError(cause)
+            ),
+          });
+        }
       })
       .finally(() => {
         this.#job = undefined;
@@ -252,7 +278,7 @@ export class WorkerHost {
     this.#job?.controller.abort(
       new DOMException("the recognizer was disposed", "AbortError")
     );
-    await this.#running;
+    await this.#running.catch(() => undefined);
     if (state.kind === "ready") {
       await state.engine.close();
     }

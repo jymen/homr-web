@@ -84,6 +84,10 @@ function harness(fail?: string) {
   };
   return {
     closes,
+    crash: () =>
+      worker.dispatchEvent(
+        Object.assign(new Event("error"), { message: "boom" })
+      ),
     create: () =>
       createRecognizer({
         baseUrl: "http://studio.test/models",
@@ -237,7 +241,64 @@ describe("dispose", () => {
   });
 });
 
+describe("dispose while a page is read", () => {
+  it("answers a page asked for during dispose as cancelled, not as a protocol error", async () => {
+    const h = harness();
+    const recognizer = await started(h);
+    const pending = recognizer.recognizePage(page());
+    await tick();
+    const disposed = recognizer.dispose();
+    const during = await recognizer.recognizePage(page());
+    expect(during).toMatchObject({
+      error: "cancelled",
+      log: "the recognizer was disposed",
+    });
+    expect((await pending).error).toBe("cancelled");
+    h.reads[0]?.finish(failedResult("wasm", "cancelled", "aborted"));
+    await disposed;
+  });
+});
+
+describe("a Worker that dies", () => {
+  it("fails the page in flight and every later page as worker_lost", async () => {
+    const h = harness();
+    const recognizer = await started(h);
+    const pending = recognizer.recognizePage(page());
+    await tick();
+    h.crash();
+    expect((await pending).error).toBe("worker_lost");
+    expect(h.terminated()).toBe(true);
+    expect((await recognizer.recognizePage(page())).error).toBe("worker_lost");
+    await recognizer.dispose();
+  });
+});
+
 describe("WorkerHost", () => {
+  it("turns an engine that throws into an engine_failed result", async () => {
+    const events: { kind: string; result?: { error: string } }[] = [];
+    const host = new WorkerHost(
+      (event) => events.push(event as never),
+      () =>
+        Promise.resolve({
+          close: () => Promise.resolve(),
+          modelBytes: new Map(),
+          read: () => Promise.reject(new Error("out of memory")),
+          report: { backend: "wasm", numThreads: 1, reason: "test" },
+        })
+    );
+    host.handle({
+      kind: "init",
+      settings: { baseUrl: "http://x/", prefer: "wasm", wasmPaths: null },
+    });
+    await tick();
+    host.handle({ id: 1, kind: "recognize", page: page() });
+    await tick();
+    expect(events.at(-1)).toMatchObject({
+      kind: "result",
+      result: { error: "engine_failed" },
+    });
+  });
+
   it("answers a malformed message and a recognize before init with error events", async () => {
     const events: unknown[] = [];
     const host = new WorkerHost(

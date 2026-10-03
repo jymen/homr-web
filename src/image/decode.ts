@@ -37,22 +37,24 @@ export async function decodePage(page: PageInput): Promise<ColorImage> {
   if (isImageData(page)) {
     return colorImageFromRgba(page.width, page.height, page.data);
   }
+  // The Worker's copy: a cloned ImageBitmap or one decoded from a Blob, closed here either way.
   const bitmap = await bitmapOf(page);
-  const { height, width } = bitmap;
-  if (width === 0 || height === 0) {
-    throw new PageInputError(`the image is ${width}x${height}`);
-  }
-  const context = new OffscreenCanvas(width, height).getContext("2d");
-  if (context === null) {
-    throw new PageInputError("this Worker has no 2d OffscreenCanvas");
-  }
-  context.drawImage(bitmap, 0, 0);
-  if (page instanceof Blob) {
+  try {
+    const { height, width } = bitmap;
+    if (width === 0 || height === 0) {
+      throw new PageInputError(`the image is ${width}x${height}`);
+    }
+    const context = new OffscreenCanvas(width, height).getContext("2d");
+    if (context === null) {
+      throw new PageInputError("this Worker has no 2d OffscreenCanvas");
+    }
+    context.drawImage(bitmap, 0, 0);
+    return colorImageFromRgba(
+      width,
+      height,
+      context.getImageData(0, 0, width, height).data
+    );
+  } finally {
     bitmap.close();
   }
-  return colorImageFromRgba(
-    width,
-    height,
-    context.getImageData(0, 0, width, height).data
-  );
 }

@@ -88,3 +88,35 @@ export function recognizePage(page: ColorImage, engine: RecognizeEngine, options
 - `load()` (B): deferred; adding it later breaks nothing.
 - `engine`-less results with app-side code translation (A): the phase file
   asks for the server's shape.
+
+## After the interrogate pass (2026-10-03)
+
+Two reviewers (opus, sonnet) read the API diff. Changed in response:
+
+- A page asked for while `dispose()` is pending answers `cancelled` at once;
+  it used to reach a closed Worker and come back `engine_failed`. Both
+  reviewers found it.
+- `WorkerHost` turns an engine that throws, or a result that cannot be
+  posted, into an `engine_failed` result; before, the page and every later
+  one hung. Both found it.
+- A new terminal code, `worker_lost`, for a crashed Worker, so the app can
+  tell "dispose and recreate" from "this page failed".
+- The page's signal reaches the model download (`open(role, batch,
+  signal)`, through `store.prefetch`), so a cancel during the first 100 MB
+  stops it.
+- `createRecognizer` rejects after 30 s without an answer to `init`, builds
+  its settings before creating the Worker, and terminates it on any failure.
+- `Recognizer.numThreads`; the Worker's copy of the bitmap is always closed;
+  dispose's timer is cleared and a crash ends its wait.
+- Documented: `models` appears twice on a first page; a page after a cancel
+  waits for the Worker.
+
+Kept: images are cloned, not transferred (the caller keeps its object);
+`parseEvent` trusts the payload of a result from its own package version;
+no `signal` on `createRecognizer` (the 30 s deadline covers the hang).
+
+Differences between the contract sketch above and the code: `cancel`
+carries `timeout`; `RecognizeEngine` has no `onModel` and its `open` takes a
+signal; the pipeline's options type is `PipelineOptions`; `WorkerHost` takes
+`(post, startEngine)`; `Recognizer` has `numThreads`; `RECOGNIZE_ERRORS`
+adds `worker_lost`.

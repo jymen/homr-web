@@ -42,8 +42,10 @@ export interface PageText {
 }
 
 /**
- * `models` counts bytes of the three models, cached ones as done, and appears
- * on the first page a recognizer reads; `segment` counts segnet batches,
+ * `models` counts bytes of the three models, cached ones as done, on the first
+ * page a recognizer reads. The segmentation model opens before `segment` and
+ * the other two after `detect`, so `models` appears twice on a first page, and
+ * a page that is not music stops short of the total; `segment` counts segnet batches,
  * `dewarp` and `staff` count staffs, `detect` and `xml` go from 0/1 to 1/1.
  */
 export const PROGRESS_STAGES = [
@@ -69,7 +71,9 @@ export interface Progress {
  * where the server would fail too; `cancelled` is the caller's signal or
  * `dispose()`; `timeout` is a signal aborted with a TimeoutError, which is
  * what `AbortSignal.timeout` does; `busy` is a second page asked for while
- * one is running.
+ * one is running; `worker_lost` means the Worker crashed or broke the
+ * protocol, and this recognizer answers nothing else from then on: dispose it
+ * and create another.
  */
 export const RECOGNIZE_ERRORS = [
   "bad_input",
@@ -79,6 +83,7 @@ export const RECOGNIZE_ERRORS = [
   "engine_missing",
   "not_music",
   "timeout",
+  "worker_lost",
 ] as const;
 export type RecognizeError = (typeof RECOGNIZE_ERRORS)[number];
 
@@ -125,3 +130,7 @@ export const failedResult = (
   staves: [],
   texts: [],
 });
+
+/** An abort whose reason is a TimeoutError, as `AbortSignal.timeout()` gives. */
+export const isTimeoutAbort = (signal: AbortSignal): boolean =>
+  signal.reason instanceof Error && signal.reason.name === "TimeoutError";

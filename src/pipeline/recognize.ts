@@ -14,6 +14,7 @@ import { generateMusicXml } from "../musicxml/generate.js";
 import {
   type Backend,
   failedResult,
+  isTimeoutAbort,
   type Progress,
   type RecognizeError,
   type RecognizeResult,
@@ -28,7 +29,12 @@ import { staffBoxes, staffPositions } from "./staff-positions.js";
 export interface RecognizeEngine {
   readonly backend: Backend;
   readonly cv: OpenCv;
-  readonly open: (role: ModelRole, batch?: number) => Promise<ModelSession>;
+  /** `signal` is the page's: a cancel during the first download stops it. */
+  readonly open: (
+    role: ModelRole,
+    batch?: number,
+    signal?: AbortSignal
+  ) => Promise<ModelSession>;
 }
 
 export interface PipelineOptions {
@@ -53,10 +59,7 @@ export function classifyFailure(
   signal: AbortSignal | undefined
 ): RecognizeError {
   if (signal?.aborted) {
-    const reason: unknown = signal.reason;
-    return reason instanceof Error && reason.name === "TimeoutError"
-      ? "timeout"
-      : "cancelled";
+    return isTimeoutAbort(signal) ? "timeout" : "cancelled";
   }
   if (cause instanceof DetectionError) {
     return NOT_MUSIC.has(cause.code) ? "not_music" : "engine_failed";
@@ -84,7 +87,7 @@ async function readPage(
 
   signal?.throwIfAborted();
   const { preprocessed, resized } = await preprocessPage(page, cv);
-  const segnet = await engine.open("segnet", DEFAULT_SEGNET_BATCH);
+  const segnet = await engine.open("segnet", DEFAULT_SEGNET_BATCH, signal);
   signal?.throwIfAborted();
   const { masks } = await segmentPage(segnet, preprocessed, {
     batch: DEFAULT_SEGNET_BATCH,
@@ -102,8 +105,8 @@ async function readPage(
     staffPositions(detection.multiStaffs, detection.preprocessed)
   );
 
-  const encoder = await engine.open("encoder");
-  const decoder = await engine.open("decoder");
+  const encoder = await engine.open("encoder", undefined, signal);
+  const decoder = await engine.open("decoder", undefined, signal);
   const voices = await parseStaffs(
     cv,
     { decoder, encoder },

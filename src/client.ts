@@ -8,6 +8,7 @@
 import {
   type Backend,
   failedResult,
+  isTimeoutAbort,
   type Progress,
   type RecognizeError,
   type RecognizeResult,
@@ -47,7 +48,13 @@ export interface Recognizer {
   readonly backendReason: string;
   /** Idempotent. Terminates the Worker; a page being read settles as `cancelled`. */
   dispose: () => Promise<void>;
-  /** Never rejects. One page at a time: a second call while one runs answers `busy`. */
+  /** WebAssembly threads the runtime applied; 1 when the page is not cross-origin isolated. */
+  readonly numThreads: number;
+  /**
+   * Never rejects. One page at a time: a second call while one runs answers
+   * `busy`. A page asked for right after a cancel is accepted and waits for
+   * the Worker to finish the cancelled page's current step.
+   */
   recognizePage: (
     page: PageInput,
     options?: RecognizeOptions
@@ -56,15 +63,14 @@ export interface Recognizer {
 
 /** How long dispose waits for the Worker to release its sessions before terminating it. */
 const CLOSE_GRACE_MS = 2000;
+/** How long createRecognizer waits for the Worker to answer init: a WebGPU probe and opencv.js take about a second. */
+const INIT_TIMEOUT_MS = 30_000;
 
 const pageBase = (): string | undefined =>
   (globalThis as { document?: { baseURI?: string } }).document?.baseURI ??
   (globalThis as { location?: { href?: string } }).location?.href;
 
 const absolute = (url: string | URL): string => new URL(url, pageBase()).href;
-
-const isTimeout = (signal: AbortSignal): boolean =>
-  signal.reason instanceof Error && signal.reason.name === "TimeoutError";
 
 interface LiveJob {
   readonly id: number;
@@ -75,6 +81,7 @@ interface LiveJob {
 class WorkerRecognizer implements Recognizer {
   readonly backend: Backend;
   readonly backendReason: string;
+  readonly numThreads: number;
   #closed: (() => void) | undefined;
   #dead: string | undefined;
   #disposing: Promise<void> | undefined;
@@ -88,6 +95,7 @@ class WorkerRecognizer implements Recognizer {
   constructor(worker: Worker, report: RuntimeReport) {
     this.backend = report.backend;
     this.backendReason = report.reason;
+    this.numThreads = report.numThreads;
     this.#worker = worker;
     worker.addEventListener("message", (event) => this.#onMessage(event.data));
     worker.addEventListener("error", (event) =>
@@ -105,11 +113,11 @@ class WorkerRecognizer implements Recognizer {
     const { onProgress, signal } = options;
     const fail = (error: RecognizeError, log: string) =>
       Promise.resolve(failedResult(this.backend, error, log));
+    if (this.#disposing !== undefined) {
+      return fail("cancelled", "the recognizer was disposed");
+    }
     if (this.#dead !== undefined) {
-      return fail(
-        this.#disposing === undefined ? "engine_failed" : "cancelled",
-        this.#dead
-      );
+      return fail("worker_lost", this.#dead);
     }
     if (!isPageInput(page)) {
       return fail(
@@ -119,7 +127,7 @@ class WorkerRecognizer implements Recognizer {
     }
     if (signal?.aborted) {
       return fail(
-        isTimeout(signal) ? "timeout" : "cancelled",
+        isTimeoutAbort(signal) ? "timeout" : "cancelled",
         "aborted before it started"
       );
     }
@@ -130,7 +138,7 @@ class WorkerRecognizer implements Recognizer {
     this.#nextId += 1;
     return new Promise((resolve) => {
       const onAbort = (): void => {
-        const timeout = signal !== undefined && isTimeout(signal);
+        const timeout = signal !== undefined && isTimeoutAbort(signal);
         this.#post({ id, kind: "cancel", timeout });
         this.#settle(
           id,
@@ -216,9 +224,10 @@ class WorkerRecognizer implements Recognizer {
     this.#dead = why;
     const live = this.#live;
     if (live !== undefined) {
-      this.#settle(live.id, failedResult(this.backend, "engine_failed", why));
+      this.#settle(live.id, failedResult(this.backend, "worker_lost", why));
     }
     this.#inWorker?.done();
+    this.#closed?.();
     this.#worker.terminate();
   }
 
@@ -231,12 +240,14 @@ class WorkerRecognizer implements Recognizer {
       );
     }
     if (this.#dead === undefined) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
       const closed = new Promise<void>((resolve) => {
         this.#closed = resolve;
-        setTimeout(resolve, CLOSE_GRACE_MS);
+        timer = setTimeout(resolve, CLOSE_GRACE_MS);
       });
       this.#post({ kind: "close" });
       await closed;
+      clearTimeout(timer);
     }
     this.#dead ??= "the recognizer was disposed";
     this.#worker.terminate();
@@ -246,6 +257,14 @@ class WorkerRecognizer implements Recognizer {
 /** Waits for the Worker's answer to `init`; any other first answer is a failed start. */
 function started(worker: Worker): Promise<RuntimeReport> {
   return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(
+        new Error(
+          `homr-web's worker did not answer init within ${INIT_TIMEOUT_MS / 1000} s`
+        )
+      );
+    }, INIT_TIMEOUT_MS);
     const onMessage = (event: MessageEvent): void => {
       const parsed = parseEvent(event.data);
       cleanup();
@@ -270,6 +289,7 @@ function started(worker: Worker): Promise<RuntimeReport> {
       );
     };
     const cleanup = (): void => {
+      clearTimeout(timer);
       worker.removeEventListener("message", onMessage);
       worker.removeEventListener("error", onError);
     };
@@ -287,11 +307,7 @@ function started(worker: Worker): Promise<RuntimeReport> {
 export async function createRecognizer(
   options: RecognizerOptions
 ): Promise<Recognizer> {
-  const worker =
-    options.createWorker?.() ??
-    new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
-  const ready = started(worker);
-  worker.postMessage({
+  const init: HostCommand = {
     kind: "init",
     settings: {
       baseUrl: absolute(options.baseUrl),
@@ -299,8 +315,13 @@ export async function createRecognizer(
       wasmPaths:
         options.wasmPaths === undefined ? null : absolute(options.wasmPaths),
     },
-  } satisfies HostCommand);
+  };
+  const worker =
+    options.createWorker?.() ??
+    new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
   try {
+    const ready = started(worker);
+    worker.postMessage(init);
     return new WorkerRecognizer(worker, await ready);
   } catch (cause) {
     worker.terminate();
