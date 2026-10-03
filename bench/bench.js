@@ -41,6 +41,7 @@
  * transport.
  */
 
+import { createRecognizer } from "../dist/index.js";
 import {
   BACKENDS,
   browserCache,
@@ -65,7 +66,7 @@ import {
   staffRegions,
   startRuntime,
   WEBGPU_DECODER_CATALOG,
-} from "../dist/index.js";
+} from "../dist/internal.js";
 
 const BATCHES = [8, 16, 32];
 const DEFAULT_BACKEND = "webgpu";
@@ -104,6 +105,8 @@ const ui = {
   log: document.querySelector("#log"),
   overlay: document.querySelector("#overlay"),
   progress: document.querySelector("#progress"),
+  recognize: document.querySelector("#recognize"),
+  recognizeOut: document.querySelector("#recognize-out"),
   run: document.querySelector("#run"),
   runs: document.querySelector("#runs"),
 };
@@ -285,7 +288,14 @@ async function ensureRuntime() {
   if (runtime !== undefined) {
     return runtime;
   }
-  runtime = await startRuntime({ maxBackend: requestedBackend() });
+  // ?threads=N: the wasm thread count, for the decoder A/B that picks the default.
+  const threads = Number(
+    new URLSearchParams(window.location.search).get("threads")
+  );
+  runtime = await startRuntime({
+    maxBackend: requestedBackend(),
+    ...(threads > 0 ? { numThreads: threads } : {}),
+  });
   log(
     `runtime: ${runtime.backend} on ${runtime.numThreads} thread(s), adapter ${runtime.probe.adapterInfo ?? "none"}`
   );
@@ -733,6 +743,101 @@ async function runAll() {
     ui.run.disabled = false;
   }
 }
+
+/** MusicXML as a comparable string: elements, sorted attributes, trimmed text. */
+function canonical(xml) {
+  const walk = (element) => {
+    const attributes = [...element.attributes]
+      .map((a) => `${a.name}=${a.value}`)
+      .sort()
+      .join(" ");
+    const text = [...element.childNodes]
+      .filter((n) => n.nodeType === Node.TEXT_NODE)
+      .map((n) => n.textContent)
+      .join("")
+      .trim();
+    return `<${element.tagName} ${attributes}>${text}${[...element.children].map(walk).join("")}</>`;
+  };
+  return walk(
+    new DOMParser().parseFromString(xml, "application/xml").documentElement
+  );
+}
+
+/**
+ * The published API as a consumer uses it: createRecognizer from
+ * dist/index.js, the whole page in its Worker, and the answer compared with
+ * homr's page.musicxml and the app server's staves.json.
+ */
+async function recognizeWithPublicApi() {
+  ui.recognize.disabled = true;
+  const out = (line) => {
+    ui.recognizeOut.textContent += `${line}\n`;
+  };
+  ui.recognizeOut.textContent = "";
+  try {
+    const fixture = requestedFixture();
+    const startedAt = performance.now();
+    const recognizer = await createRecognizer({
+      baseUrl: MODELS_BASE_URL,
+      prefer: requestedBackend(),
+      wasmPaths: "/node_modules/onnxruntime-web/dist/",
+    });
+    out(
+      `createRecognizer: ${recognizer.backend} in ${ms(performance.now() - startedAt)} (${recognizer.backendReason})`
+    );
+    try {
+      const blob = await (await fetch(`/test/fixtures/${fixture}.png`)).blob();
+      let last = "";
+      const result = await recognizer.recognizePage(blob, {
+        onProgress: ({ done, stage, total }) => {
+          const line = `${stage} ${count(done)}/${count(total)}`;
+          ui.progress.textContent = line;
+          if (stage !== last) {
+            out(`  ${line} at ${ms(performance.now() - startedAt)}`);
+            last = stage;
+          }
+        },
+      });
+      out(
+        `recognizePage: ok ${result.ok}, error "${result.error}", ${ms(result.durationMs)}, backend ${result.backend}`
+      );
+      const [xml, staves] = await Promise.all([
+        fetch(`/test/golden/${fixture}/page.musicxml`).then((r) => r.text()),
+        fetch(`/test/golden/${fixture}/staves.json`).then((r) => r.json()),
+      ]);
+      let verdict = "DIFFERS from";
+      if (result.musicXml === xml) {
+        verdict = "byte-equal to";
+      } else if (canonical(result.musicXml) === canonical(xml)) {
+        verdict = "canonically equal to";
+      }
+      out(`musicXml ${verdict} page.musicxml`);
+      const worst = Math.max(
+        0,
+        ...staves.flatMap((want, i) =>
+          ["cx", "cy", "w", "h"].map((k) =>
+            Math.abs((result.staves[i]?.[k] ?? Number.NaN) - want[k])
+          )
+        )
+      );
+      out(
+        `staves: ${result.staves.length} against ${staves.length} in staves.json, largest difference ${worst.toExponential(2)}`
+      );
+      out(`log: ${result.log}`);
+    } finally {
+      await recognizer.dispose();
+    }
+  } catch (error) {
+    out(`failed: ${error instanceof Error ? error.message : String(error)}`);
+  } finally {
+    ui.progress.textContent = "";
+    ui.recognize.disabled = false;
+  }
+}
+
+ui.recognize.addEventListener("click", () => {
+  recognizeWithPublicApi().catch(() => undefined);
+});
 
 showIsolation();
 wireBackendChooser();

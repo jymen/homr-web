@@ -19,7 +19,7 @@
  */
 
 import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { createServer } from "node:http";
 import { extname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -84,6 +84,26 @@ function headersFor(pathname, size) {
   };
 }
 
+/**
+ * The bench page's import map, applied by the server to dist/. A module
+ * Worker gets no import map in Chrome, and dist/worker.js reaches the same
+ * three packages the page does, so the bare specifiers are rewritten here
+ * instead. A bundler does this for a real consumer.
+ */
+const BARE_SPECIFIERS = {
+  "@techstark/opencv-js": "/bench/opencv-esm.js",
+  delaunator: "/node_modules/delaunator/index.js",
+  "onnxruntime-web": "/node_modules/onnxruntime-web/dist/ort.bundle.min.mjs",
+  "robust-predicates": "/node_modules/robust-predicates/index.js",
+};
+
+const rewriteBareSpecifiers = (source) =>
+  source.replace(
+    /(from\s*|import\(\s*)"([^"./][^"]*)"/g,
+    (whole, lead, name) =>
+      name in BARE_SPECIFIERS ? `${lead}"${BARE_SPECIFIERS[name]}"` : whole
+  );
+
 function refuse(response, status, message) {
   const body = Buffer.from(`${message}\n`, "utf8");
   response.writeHead(status, {
@@ -115,6 +135,15 @@ async function serve(request, response) {
   }
   if (!stats.isFile()) {
     refuse(response, 404, `${pathname} is not a file`);
+    return;
+  }
+  if (pathname.startsWith("/dist/") && pathname.endsWith(".js")) {
+    const body = Buffer.from(
+      rewriteBareSpecifiers(await readFile(file, "utf8")),
+      "utf8"
+    );
+    response.writeHead(200, headersFor(pathname, body.length));
+    response.end(request.method === "HEAD" ? undefined : body);
     return;
   }
   const headers = headersFor(pathname, stats.size);
