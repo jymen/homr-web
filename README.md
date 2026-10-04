@@ -217,7 +217,9 @@ Scans, published pages and photographs stay in the git-ignored
 
 ```bash
 PYTHON=python3.12 ./tools/venv.sh   # once: homr 0.7.0 in .venv
-./tools/fetch-models.sh              # the models, into models/
+./tools/fetch-models.sh              # the models, into models/ (from the venv)
+# or, with no venv, as CI does: download and hash-check all nine
+HOMR_WEB_MODELS_RELEASE=models-homr0.7.0 ./tools/download-models.sh
 npm run golden && npm run vectors    # regenerate the oracle
 npm run ocr                          # RapidOCR's stages per strip
 ./tools/dump-texts.sh <AbcGoDb checkout> <server homr venv>   # the server's texts

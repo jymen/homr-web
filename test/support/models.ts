@@ -34,7 +34,7 @@ import {
 } from "../../src/models/store.js";
 
 export const FETCH_MODELS_HINT =
-  "models/ incomplete, run tools/fetch-models.sh and tools/export-decoder.py";
+  "models/ incomplete, run HOMR_WEB_MODELS_RELEASE=models-homr0.7.0 tools/download-models.sh";
 
 export function modelsDir(): string {
   return join(import.meta.dirname, "..", "..", "models");
