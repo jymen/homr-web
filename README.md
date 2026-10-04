@@ -2,14 +2,15 @@
 
 A port of [homr](https://github.com/liebharc/homr), Christian Liebhardt's
 optical music recognition engine, to TypeScript running in the browser. A
-page of sheet music goes in, MusicXML comes out, and no server is involved:
-the segmentation and transformer models run on the musician's own machine
-through onnxruntime-web, on WebGPU where the browser has it and on
+page of sheet music goes in, MusicXML and the chord symbols above each staff
+come out, and no server is involved: the segmentation, transformer and OCR
+models run on the musician's own machine through onnxruntime-web, on WebGPU where the browser has it and on
 WebAssembly elsewhere.
 
-On both public test pages the MusicXML equals the file homr 0.7.0 writes for
-the same page, and the staff rectangles equal what the AbcMusicStudio server
-reads from homr's staff-positions file.
+On the three public test pages the MusicXML, title included, equals the file
+homr 0.7.0 writes for the same page, the staff rectangles equal what the
+AbcMusicStudio server reads from homr's staff-positions file, and the texts
+equal the ones the server's chord OCR reads with RapidOCR 3.9.2.
 
 ## Usage
 
@@ -31,8 +32,9 @@ const result = await recognizer.recognizePage(pngBlob, {
 });
 
 if (result.ok) {
-  render(result.musicXml); // MusicXML 4.0, one part per voice
+  render(result.musicXml); // MusicXML 4.0, one part per voice, homr's title in work-title
   console.log(result.staves); // [{ index, cx, cy, w, h }], page-normalised, top to bottom
+  console.log(result.texts); // [{ staff, text, score, x0, y0, x1, y1 }], the chords above each staff
 } else {
   console.warn(result.error, result.log);
 }
@@ -57,16 +59,38 @@ with `ok: false` and one of these codes in `error`:
 
 The result has the shape of the AbcMusicStudio server's homr route (`engine`,
 `ok`, `error`, `musicXml`, `log`, `durationMs`, `staves`, `texts`) plus
-`backend`. `texts` is always empty: chord and title OCR is not ported yet.
+`backend`. `texts` holds what RapidOCR reads in the strip from 1.9 to 0.05
+staff heights above each staff, 3 % of the page wider on the left and 2 % on
+the right: one entry per line of text, its box normalised to the page and
+rounded to 4 digits, its score to 3, sorted by staff and then from left to
+right, as the server answers. Lines scoring under 0.5 are dropped, as the
+server drops them; `minTextScore` changes that threshold (the AbcMusicStudio
+app keeps texts at 0.6 and above). Chord symbols come out as the recogniser
+reads them, which is not always as typeset: on the chord test page `F♯m` reads
+`7#m` and `Em` is missed twice, on the server as here. A failure of the OCR alone never fails the page: `texts` is
+empty, `work-title` blank, and the reason is a line of `log`.
 
-Progress arrives in stages: `models` (bytes of the three models, on the first
+To read the strips alone above staves you already have, for example the
+server's:
+
+```ts
+const strips = await recognizer.readTextStrips(pngBlob, staves, { signal });
+console.log(strips.texts); // musicXml is "", staves are the ones given
+```
+
+Progress arrives in stages: `models` (bytes of the six models, on the first
 page only), `segment` (tiles), `detect`, `dewarp` and `staff` (one each per
-staff), and `xml`. On a first page `models` appears twice, before `segment`
-for the segmentation model and after `detect` for the transformer, and a
-page that is not music never downloads the transformer. On an Apple M-series laptop with WebGPU a page takes 5 to
-7 seconds once the models are cached. Under Node on one WebAssembly thread it
-takes about 40 seconds; WebAssembly threads in a browser were not timed. The models are about 100 MB on WebGPU and 160 MB on WebAssembly,
-downloaded on the first page and cached by the browser after that.
+staff), `ocr` (one per staff, and one for the title), and `xml`. On a first
+page `models` appears three times, before `segment` for the segmentation
+model, after `detect` for the transformer and before `ocr` for the three OCR
+models; a page that is not music never downloads the transformer, and
+`{ ocr: false }` never downloads the OCR models. On an Apple M-series laptop with WebGPU a page takes 7 to
+9 seconds once the models are cached, of which the OCR is about 3 seconds
+(about 5 on WebAssembly threads); `readTextStrips` alone takes about 2.5
+seconds. Under Node on one WebAssembly thread a page takes about 55 seconds,
+about 14 of them OCR. The models are about 134 MB on WebGPU and 189 MB on
+WebAssembly, the OCR's 32 MB included, downloaded on the first page and
+cached by the browser after that.
 
 `createRecognizer` rejects when the Worker cannot start, for example when
 the browser has no module Workers, or when it has not answered within 30
@@ -74,30 +98,38 @@ seconds. One recognizer reads one page at a time; read the pages of a PDF one
 after another. A page asked for right after a cancel is accepted and starts
 once the Worker has finished the cancelled page's current step.
 
-Options: `baseUrl` (required), `prefer` (the best backend to try, default
-`"webgpu"`), `wasmPaths` (where onnxruntime-web's `.wasm` and `.mjs` files
-are served, when your bundler does not place them itself), and
-`createWorker` (see below).
+Options of `createRecognizer`: `baseUrl` (required), `prefer` (the best
+backend to try, default `"webgpu"`), `wasmPaths` (where onnxruntime-web's
+`.wasm` and `.mjs` files are served, when your bundler does not place them
+itself), and `createWorker` (see below). Options of `recognizePage`:
+`onProgress`, `signal`, `ocr` (default `true`) and `minTextScore` (default
+`0.5`); `readTextStrips` takes the same less `ocr`.
 
 ### Bundlers
 
 The library starts its Worker with
 `new Worker(new URL("./worker.js", import.meta.url), { type: "module" })`,
-which Vite, Rollup and webpack 5 resolve. OpenCV.js is a UMD bundle, and
-Vite's dev server does not pre-bundle a dependency reached only from a
-Worker, so Vite needs it named:
+which Vite, Rollup and webpack 5 resolve in a production build. Vite's dev
+server needs three things named. OpenCV.js is a UMD bundle, and Vite does not
+pre-bundle a dependency reached only from a Worker, so it must be included.
+homr-web and onnxruntime-web must be excluded: pre-bundled, homr-web's
+Worker URL is rewritten to `/node_modules/.vite/deps/worker.js`, which
+answers 404, and onnxruntime-web looks for its `.wasm` under `.vite/deps`.
 
 ```ts
 // vite.config.ts
 export default defineConfig({
-  optimizeDeps: { include: ["homr-web > @techstark/opencv-js"] },
+  optimizeDeps: {
+    exclude: ["homr-web", "onnxruntime-web"],
+    include: ["homr-web > @techstark/opencv-js"],
+  },
 });
 ```
 
-That configuration was checked with a fresh `npm create vite` project (Vite
-8.3), in `vite dev`, where Vite pre-bundled homr-web itself and the Worker
-still resolved, and in `vite build` with `vite preview`. Not yet checked
-under SvelteKit. For a bundler that cannot
+That configuration was checked in the AbcMusicStudio app (SvelteKit, Vite
+dev and production build) on 2026-10-04 with homr-web 0.1.0. With only the
+`include`, `createRecognizer` rejects in dev with "homr-web's worker did not
+load"; production builds work either way. For a bundler that cannot
 resolve the Worker URL, pass your own Worker:
 `createRecognizer({ baseUrl, createWorker: () => new Worker(url, { type: "module" }) })`,
 where `url` serves the `homr-web/worker` entry.
@@ -116,9 +148,15 @@ SHA-256 before use.
 | `6ed36640db4ef5d223098b6d5efe4eda97c66b24a2c72faab8a018c749003a8d/segnet_308-3296ccd40960f90ca6ab9c035cca945675d30a0f.onnx` | WebAssembly | 57 311 361 |
 | `4c16df852b3789f2676b0d49f0545dab0740e4005f7b472c5252add642f5d5eb/encoder_pytorch_model_396-f6feedb42ff90087d898b0941a55d040fa6b2903.onnx` | WebAssembly | 52 861 122 |
 | `3e10fd5ae52d0b86792721922fcd954c283a7ed365de7446425bdabe38f3e57d/decoder_pytorch_model_396-f6feedb42ff90087d898b0941a55d040fa6b2903.onnx` | both | 47 299 551 |
+| `090f04abcd9d9a7498bc4ebf677e4cb9bdce1fe4197ddb7e529f1ef44e1ff94f/PP-OCRv6_det_small.onnx` | both, OCR | 9 929 594 |
+| `e47acedf663230f8863ff1ab0e64dd2d82b838fceb5957146dab185a89d6215c/ch_ppocr_mobile_v2.0_cls_mobile.onnx` | both, OCR | 585 532 |
+| `6f327246b50388f3c176ae304bd95767ea6dc0c9ae92153ef8cbe210b3c14884/PP-OCRv6_rec_small.onnx` | both, OCR | 21 234 383 |
 
 The fp32 files are the ones homr 0.7.0 installs; the two fp16 files are
-homr's own `onnx_checkpoints` release assets. `tools/fetch-models.sh`
+homr's own `onnx_checkpoints` release assets; the three OCR files are the ones
+rapidocr 3.9.2 ships in its wheel and loads by default (PP-OCRv6 small
+detection and recognition, the PP-OCRv4 line of the v2.0 mobile direction
+classifier), Apache 2.0. `tools/fetch-models.sh`
 collects all of them into `models/`.
 
 ### Cross-origin isolation
@@ -143,10 +181,10 @@ which is slower. `recognizer.backendReason` says which case applies.
 | homr release | 0.7.0, commit `8b5dcf7d7bdd1a47911dc0c661c573b957271eab` |
 | segmentation model | `segnet_308-3296ccd40960f90ca6ab9c035cca945675d30a0f` |
 | transformer | `pytorch_model_396-f6feedb42ff90087d898b0941a55d040fa6b2903` (encoder and decoder) |
+| chord and title OCR | RapidOCR 3.9.2's default pipeline, and the AbcMusicStudio server's strip geometry (`omr_chord_ocr.py`) |
 
-`HOMR_VERSION` and `HOMR_COMMIT` are exported. Three behaviours differ from
-running homr on the command line. The title is not detected, so
-`<work-title>` is empty. A multi-page input is one call per page; homr 0.7.0
+`HOMR_VERSION` and `HOMR_COMMIT` are exported. Two behaviours differ from
+running homr on the command line. A multi-page input is one call per page; homr 0.7.0
 does not join pages either. And the image is decoded by the browser without
 colour management and with its alpha channel dropped, as `cv2.imread` does,
 so a transparent pixel reads as its stored colour: flatten a transparent
@@ -162,7 +200,10 @@ OpenCV build. Neither changes a token on the test pages.
 
 `tools/dump-golden.py` runs the pinned homr on each page in
 `test/fixtures/` and writes the output of every stage to
-`test/golden/<fixture>/`. Each TypeScript stage is tested against the
+`test/golden/<fixture>/`, homr's title included. `tools/dump-texts.sh` runs
+the AbcMusicStudio server's own chord OCR code on each page into
+`texts.json`, and `tools/dump-ocr.py` writes every RapidOCR stage of each
+strip into `ocr.json`. Each TypeScript stage is tested against the
 Python output of the stage before it, so a tolerance accepted in one stage
 cannot hide a defect in the next, and `test/recognize-golden.test.ts` runs
 each page from its PNG through the whole port against homr's
@@ -178,6 +219,8 @@ Scans, published pages and photographs stay in the git-ignored
 PYTHON=python3.12 ./tools/venv.sh   # once: homr 0.7.0 in .venv
 ./tools/fetch-models.sh              # the models, into models/
 npm run golden && npm run vectors    # regenerate the oracle
+npm run ocr                          # RapidOCR's stages per strip
+./tools/dump-texts.sh <AbcGoDb checkout> <server homr venv>   # the server's texts
 npm ci && npm run check && npm run lint && npm test
 npm run bench                        # the browser bench, with COOP and COEP
 ```
