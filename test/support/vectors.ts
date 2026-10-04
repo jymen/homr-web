@@ -44,7 +44,9 @@ export const VECTOR_FILES = [
   "noise",
   "normalize",
   "notehead-clumps",
+  "ocr-unclip",
   "pairwise",
+  "python-round",
   "raw-staff-merge",
   "resample",
   "staff-merge",
@@ -261,6 +263,38 @@ const BRACES_CHECK: VectorCheck = {
     );
   },
   keys: ["name", "staffs", "braceDot"],
+};
+
+const OCR_UNCLIP_CHECK: VectorCheck = {
+  check: (one, at) => {
+    for (const key of ["points", "box"] as const) {
+      const corners = list(one[key], `${at}.${key}`);
+      need(corners.length === 4, `${at}.${key}: four corners`);
+      for (const corner of corners) {
+        numberList(corner, `${at}.${key}`, 2);
+      }
+    }
+    for (const point of list(one.expanded, `${at}.expanded`)) {
+      numberList(point, `${at}.expanded`, 2);
+    }
+    need(isNumber(one.distance), `${at}.distance: expected a number`);
+    need(isNumber(one.sside), `${at}.sside: expected a number`);
+  },
+  keys: ["points", "distance", "expanded", "box", "sside"],
+};
+
+const PYTHON_ROUND_CHECK: VectorCheck = {
+  check: (one, at) => {
+    if ("conf" in one) {
+      numberList(one.conf, `${at}.conf`);
+      need(isNumber(one.meanRound5), `${at}.meanRound5: expected a number`);
+      return;
+    }
+    for (const key of ["x", "round3", "round4", "round5", "npRound5"]) {
+      need(isNumber(one[key]), `${at}.${key}: expected a number`);
+    }
+  },
+  keys: [],
 };
 
 const VECTOR_CHECKS: Record<VectorFile, VectorCheck> = {
@@ -596,6 +630,7 @@ const VECTOR_CHECKS: Record<VectorFile, VectorCheck> = {
       "notesPerStaff",
     ],
   },
+  "ocr-unclip": OCR_UNCLIP_CHECK,
   pairwise: {
     check: (one, at) => {
       const values = numberList(one.values, `${at}.values`);
@@ -609,6 +644,7 @@ const VECTOR_CHECKS: Record<VectorFile, VectorCheck> = {
     },
     keys: ["values", "sum", "mean", "std"],
   },
+  "python-round": PYTHON_ROUND_CHECK,
   "raw-staff-merge": {
     check: (one, at) => {
       const count = needRects(one.fragments, `${at}.fragments`);

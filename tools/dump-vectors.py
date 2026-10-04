@@ -1780,6 +1780,70 @@ def dump_normalize() -> None:
     write_vectors("normalize", cases, source="staff2score.ConvertToArray, then astype(float16) as encoder_inference.py does")
 
 
+# ocr-unclip.json and python-round.json
+
+
+def dump_ocr_unclip() -> None:
+    """DBPostProcess.unclip then get_mini_boxes, rapidocr's box expansion: the
+    float32 boxPoints corners in, pyclipper's integer polygon and the expanded
+    rectangle out. Rectangles span chord-symbol sizes, upright, slightly turned
+    and steep, with fractional centres."""
+    import pyclipper
+    from rapidocr.ch_ppocr_det.utils import DBPostProcess
+    from shapely.geometry import Polygon
+
+    post = DBPostProcess(thresh=0.3, box_thresh=0.5, max_candidates=1000, unclip_ratio=1.6, use_dilation=True)
+    rng = np.random.default_rng(11)
+    cases = []
+    angles = [0.0, -90.0, 90.0, 45.0, -45.0, 0.5, -0.5, 1.7, -3.2, 12.0, -30.0, 60.0, 89.5, -89.5]
+    for i in range(240):
+        w = float(rng.choice([3.0, 4.0, 5.5, 8.0, 17.0, 31.0, 64.0, 140.0, 400.0, 1200.0])) * float(rng.uniform(0.9, 1.1))
+        h = float(rng.choice([3.0, 4.0, 6.0, 12.0, 24.0, 48.0, 90.0])) * float(rng.uniform(0.9, 1.1))
+        angle = angles[i % len(angles)] if i < 2 * len(angles) else float(rng.uniform(-90, 90))
+        cx = float(rng.uniform(20, 2900))
+        cy = float(rng.uniform(20, 700))
+        if i % 3 == 0:
+            cx, cy, w, h = round(cx), round(cy), round(w), round(h)
+        points = cv2.boxPoints(((cx, cy), (w, h), angle))
+        expanded = post.unclip(points)
+        box, sside = post.get_mini_boxes(expanded)
+        cases.append(
+            {
+                "points": [[float(v) for v in p] for p in points],
+                "distance": float(Polygon(points).area * 1.6 / Polygon(points).length),
+                "expanded": [[int(v) for v in p] for p in expanded.reshape(-1, 2)],
+                "box": [[float(v) for v in p] for p in box],
+                "sside": float(sside),
+            }
+        )
+    write_vectors("ocr-unclip", cases, pyclipper=pyclipper.__version__)
+
+
+def dump_python_round() -> None:
+    """Python's round(x, n), numpy's ndarray.round(n) and np.mean(...).round(5)
+    as rapidocr's CTC decode and omr_chord_ocr.py use them."""
+    rng = np.random.default_rng(5)
+    values = [0.125, 0.375, 2.5, 0.0005, 0.00015, 0.99995, 0.12345, 0.5, 1.0, 0.9999949999, 0.59949999]
+    values += [float(v) for v in rng.uniform(0, 1, 300)]
+    values += [float(np.float32(v)) for v in rng.uniform(0, 1, 300)]
+    values += [k / 2**12 for k in range(0, 4096, 37)]
+    cases = []
+    for v in values:
+        cases.append(
+            {
+                "x": v,
+                "round3": round(v, 3),
+                "round4": round(v, 4),
+                "round5": round(v, 5),
+                "npRound5": float(np.float64(v).round(5)),
+            }
+        )
+    for n in (1, 2, 3, 5, 7, 8, 9, 16, 25):
+        conf = [round(float(np.float32(c)), 5) for c in rng.uniform(0.3, 1.0, n)]
+        cases.append({"conf": conf, "meanRound5": np.mean(conf).round(5).tolist()})
+    write_vectors("python-round", cases)
+
+
 DUMPERS = {
     "pairwise": dump_pairwise,
     "floor-div": dump_floor_div,
@@ -1809,6 +1873,8 @@ DUMPERS = {
     "vocabulary-cleanup": dump_vocabulary_cleanup,
     "normalize": dump_normalize,
     "musicxml": dump_musicxml,
+    "ocr-unclip": dump_ocr_unclip,
+    "python-round": dump_python_round,
 }
 
 

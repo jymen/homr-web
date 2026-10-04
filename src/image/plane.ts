@@ -278,6 +278,17 @@ function sliceRegion<P extends Plane>(plane: P, region: Region): P {
   return build(plane.kind, width, height, out) as P;
 }
 
+/** numpy's `plane[y1:y2, x1:x2]` for bounds already clamped as a slice clamps them: a copy, empty when inverted. */
+export function slicePlane<P extends Plane>(
+  plane: P,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number
+): P {
+  return sliceRegion(plane, { x1, x2, y1, y2 });
+}
+
 /**
  * homr's image_utils.crop_image: orders the corners, clamps each to
  * [0, size - 1] after Python round() (half to even), then slices half-open

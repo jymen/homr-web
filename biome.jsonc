@@ -56,7 +56,14 @@
       // bounded by the model's own pinned batch dimension. Running a page's
       // seven batches together would hold 207 MB of input and logit tensors in
       // that one arena instead of 30.
-      "includes": ["src/segmentation/segment.ts"],
+      // The OCR runs its strips, batches and crops one after another for the
+      // same reason, and because RapidOCR's batches are its own fixed order.
+      "includes": [
+        "src/segmentation/segment.ts",
+        "src/ocr/page.ts",
+        "src/ocr/rapid-ocr.ts",
+        "test/ocr-golden.test.ts"
+      ],
       "linter": {
         "rules": {
           "performance": { "noAwaitInLoops": "off" }

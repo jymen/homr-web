@@ -157,6 +157,39 @@ export function roundHalfEven(x: number): number {
   return rounded === 0 ? 0 : rounded;
 }
 
+/** toFixed's ceiling: enough for the exact expansion of any double above 1e-14. */
+const EXACT_DIGITS = 100;
+const NEGLIGIBLE = 1e-14;
+const ALL_ZEROS = /^0*$/;
+
+/**
+ * Python's round(x, ndigits): the decimal nearest the double's exact value,
+ * ties to even. toFixed(100) is that exact value, so the decision is made on
+ * its digits; toFixed(ndigits) alone breaks an exact tie upwards.
+ */
+export function pyRound(x: number, ndigits: number): number {
+  if (Math.abs(x) < NEGLIGIBLE) {
+    return x * 0;
+  }
+  const exact = Math.abs(x).toFixed(EXACT_DIGITS);
+  const point = exact.indexOf(".");
+  const kept = exact.slice(0, point + 1 + ndigits);
+  const next = exact.charAt(point + 1 + ndigits);
+  const rest = exact.slice(point + 2 + ndigits);
+  const last = kept.at(-1);
+  const tie = next === "5" && ALL_ZEROS.test(rest);
+  const up =
+    next > "5" || (next === "5" && !tie) || (tie && Number(last) % 2 === 1);
+  const magnitude = Number(kept) + (up ? 10 ** -ndigits : 0);
+  return Math.sign(x) * Number(magnitude.toFixed(ndigits));
+}
+
+/** numpy's ndarray.round(decimals) on a float64: scale, rint (ties to even), unscale. */
+export function npRound(x: number, decimals: number): number {
+  const scale = 10 ** decimals;
+  return roundHalfEven(x * scale) / scale;
+}
+
 /**
  * Python's `//` on floats, as CPython's float_floor_div computes it: from
  * fmod, not from the quotient. `Math.floor(a / b)` is one too high when

@@ -56,6 +56,13 @@ import {
  * C++ is; halving a float32 is exact, so only the products and sums are rounded.
  */
 export function polygonViaBoxPoints(rect: RotatedRectParams): PointList {
+  return pointListFromPairs(boxPointsFloat32(rect));
+}
+
+/** `cv2.boxPoints(rect)` itself, the four float32 corners, before any int conversion. */
+export function boxPointsFloat32(
+  rect: RotatedRectParams
+): readonly [Corner, Corner, Corner, Corner] {
   const radians = (rect.angle * Math.PI) / 180;
   const halfSin = toFloat32(Math.sin(radians)) * 0.5;
   const halfCos = toFloat32(Math.cos(radians)) * 0.5;
@@ -67,13 +74,15 @@ export function polygonViaBoxPoints(rect: RotatedRectParams): PointList {
   const right = toFloat32(rect.cx + sinH);
   const upper = toFloat32(rect.cy - cosH);
   const lower = toFloat32(rect.cy + cosH);
-  return pointListFromPairs([
+  return [
     [toFloat32(left - cosW), toFloat32(lower - sinW)],
     [toFloat32(right - cosW), toFloat32(upper - sinW)],
     [toFloat32(right + cosW), toFloat32(upper + sinW)],
     [toFloat32(left + cosW), toFloat32(lower + sinW)],
-  ]);
+  ];
 }
+
+export type Corner = readonly [number, number];
 
 /**
  * `RotatedBoundingBox(box, contours, debug_id)` from numbers Python wrote

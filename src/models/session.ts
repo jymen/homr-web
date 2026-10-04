@@ -18,6 +18,7 @@ import type {
   ResolvedModel,
   TensorSpec,
 } from "./manifest.js";
+import { readOnnxMetadata } from "./onnx-metadata.js";
 
 export interface SessionTuning {
   /**
@@ -33,6 +34,8 @@ export interface ModelSession {
   readonly close: () => Promise<void>;
   /** The spec by name, throwing on a miss: the boundary check that absorbs noUncheckedIndexedAccess once instead of at every call site. `.type` is what the caller writes, and "float16" means IEEE halves in a Uint16Array. */
   readonly inputSpec: (name: string) => TensorSpec;
+  /** The file's metadata_props, which onnxruntime-web does not expose. */
+  readonly metadata: ReadonlyMap<string, string>;
   readonly outputSpec: (name: string) => TensorSpec;
   readonly plan: ResolvedModel;
   readonly role: ModelRole;
@@ -179,6 +182,7 @@ export async function openModelSession(
       await session.release();
     },
     inputSpec: (name) => lookup(inputs, plan.role, "input", name),
+    metadata: readOnnxMetadata(bytes),
     outputSpec: (name) => lookup(outputs, plan.role, "output", name),
     plan,
     role: plan.role,
