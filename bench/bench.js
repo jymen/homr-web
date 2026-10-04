@@ -80,6 +80,8 @@ const MODELS_BASE_URL = "/models/";
  * like a segmentation, and no other signal in a run would report it.
  */
 const FIXTURE_DIGESTS = {
+  "chord-study-300dpi":
+    "660390ac27bcaf4d6c3cfc923c9f3c91673881d89154feaaf51fc57b85335e6b",
   "grand-staff-300dpi":
     "1cbd050f2d38e700954680c9a37d8156d58e399e5a983e4266c3e50bb51bf8e3",
   "the-kesh-300dpi":
@@ -765,8 +767,9 @@ function canonical(xml) {
 
 /**
  * The published API as a consumer uses it: createRecognizer from
- * dist/index.js, the whole page in its Worker, and the answer compared with
- * homr's page.musicxml and the app server's staves.json.
+ * dist/index.js, the whole page in its Worker twice, cold then warm, and the
+ * answer compared with homr's page.musicxml and the app server's staves.json
+ * and texts.json, then the chord strips alone through readTextStrips.
  */
 async function recognizeWithPublicApi() {
   ui.recognize.disabled = true;
@@ -787,24 +790,34 @@ async function recognizeWithPublicApi() {
     );
     try {
       const blob = await (await fetch(`/test/fixtures/${fixture}.png`)).blob();
-      let last = "";
-      const result = await recognizer.recognizePage(blob, {
-        onProgress: ({ done, stage, total }) => {
-          const line = `${stage} ${count(done)}/${count(total)}`;
-          ui.progress.textContent = line;
-          if (stage !== last) {
-            out(`  ${line} at ${ms(performance.now() - startedAt)}`);
-            last = stage;
-          }
-        },
-      });
-      out(
-        `recognizePage: ok ${result.ok}, error "${result.error}", ${ms(result.durationMs)}, backend ${result.backend}`
-      );
-      const [xml, staves] = await Promise.all([
+      const [xml, staves, texts] = await Promise.all([
         fetch(`/test/golden/${fixture}/page.musicxml`).then((r) => r.text()),
         fetch(`/test/golden/${fixture}/staves.json`).then((r) => r.json()),
+        fetch(`/test/golden/${fixture}/texts.json`).then((r) => r.json()),
       ]);
+      let result;
+      for (const run of ["cold", "warm"]) {
+        let last = "";
+        const stageStart = new Map();
+        const runStart = performance.now();
+        result = await recognizer.recognizePage(blob, {
+          onProgress: ({ done, stage, total }) => {
+            const line = `${stage} ${count(done)}/${count(total)}`;
+            ui.progress.textContent = line;
+            if (stage !== last) {
+              stageStart.set(stage, performance.now());
+              out(`  ${run} ${line} at ${ms(performance.now() - runStart)}`);
+              last = stage;
+            }
+          },
+        });
+        const ocrMs =
+          (stageStart.get("xml") ?? Number.NaN) -
+          (stageStart.get("ocr") ?? Number.NaN);
+        out(
+          `recognizePage ${run}: ok ${result.ok}, error "${result.error}", ${ms(result.durationMs)}, backend ${result.backend}, ocr stage ${ms(ocrMs)}`
+        );
+      }
       let verdict = "DIFFERS from";
       if (result.musicXml === xml) {
         verdict = "byte-equal to";
@@ -822,6 +835,31 @@ async function recognizeWithPublicApi() {
       );
       out(
         `staves: ${result.staves.length} against ${staves.length} in staves.json, largest difference ${worst.toExponential(2)}`
+      );
+      const sameTexts =
+        JSON.stringify(result.texts.map((t) => [t.staff, t.text])) ===
+        JSON.stringify(texts.map((t) => [t.staff, t.text]));
+      const worstBox = Math.max(
+        0,
+        ...texts.flatMap((want, i) =>
+          ["x0", "y0", "x1", "y1"].map((k) =>
+            Math.abs((result.texts[i]?.[k] ?? Number.NaN) - want[k])
+          )
+        )
+      );
+      const worstScore = Math.max(
+        0,
+        ...texts.map((want, i) =>
+          Math.abs((result.texts[i]?.score ?? Number.NaN) - want.score)
+        )
+      );
+      out(
+        `texts: ${result.texts.length} against ${texts.length} in texts.json, ${sameTexts ? "same staves and texts" : "TEXTS DIFFER"}, largest box difference ${worstBox.toExponential(2)}, largest score difference ${worstScore.toFixed(3)}`
+      );
+      const stripsStart = performance.now();
+      const strips = await recognizer.readTextStrips(blob, staves);
+      out(
+        `readTextStrips: ok ${strips.ok}, ${strips.texts.length} texts, ${ms(performance.now() - stripsStart)}`
       );
       out(`log: ${result.log}`);
     } finally {
