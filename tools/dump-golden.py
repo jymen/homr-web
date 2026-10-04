@@ -5,10 +5,10 @@ Nothing in homr is patched: the script calls the same functions main.py
 calls, in the same order, on the CPU with the fp32 models, and saves what
 they return. Run twice, it writes byte-identical files.
 
-Five homr functions are unrolled into the calls they make, so that their
+Six homr functions are unrolled into the calls they make, so that their
 intermediate values can be saved: create_noise_grid, detect_staff,
-add_notes_to_staffs, find_braces_brackets_and_grand_staff_lines and
-prepare_staff_image. Each
+add_notes_to_staffs, find_braces_brackets_and_grand_staff_lines,
+prepare_staff_image and title_detection's _detect_title_task. Each
 unrolled block is followed by a call of the real function, and the script
 exits non-zero unless the two results serialise identically."""
 
@@ -89,6 +89,7 @@ from homr.staff_parsing import (  # noqa: E402
 from homr.staff_parsing_tromr import parse_staff_tromr  # noqa: E402
 from homr.staff_position_save_load import save_staff_positions  # noqa: E402
 from homr.staff_regions import StaffRegions  # noqa: E402
+from homr.title_detection import _detect_title_task, cleanup_text, is_tempo_marking  # noqa: E402
 from homr.transformer.configs import Config  # noqa: E402
 from homr.transformer.vocabulary import EncodedSymbol, remove_duplicated_symbols  # noqa: E402
 
@@ -404,6 +405,44 @@ def unrolled_prepare_staff_image(staff, image: np.ndarray, regions: StaffRegions
     return canvas, staff_in_crop, intermediates, cropped, warped, cleaned
 
 
+def unrolled_title(original: np.ndarray, top_staff) -> dict:
+    """_detect_title_task with its crop and RapidOCR's answer kept. The real
+    function then runs on a Debug rooted in a temporary directory, because it
+    writes the crop it hands to RapidOCR next to the page."""
+    import tempfile
+
+    import homr.title_detection as title_detection
+
+    height = int(15 * top_staff.average_unit_size)
+    y = max(int(top_staff.min_y) - height, 0)
+    x = max(int(top_staff.min_x) - 50, 0)
+    width = int(top_staff.max_x - top_staff.min_x) + 100
+    width = min(width, original.shape[1] - x)
+    height = min(height, int(top_staff.min_y) - y)
+    with tempfile.TemporaryDirectory() as tmp:
+        crop_path = str(Path(tmp) / "crop.png")
+        cv2.imwrite(crop_path, original[y : y + height, x : x + width])
+        title_detection._initialize_reader()
+        found = title_detection._reader(crop_path)
+        results = []
+        if found.txts is not None:
+            results = [
+                {"box": [[float(v) for v in p] for p in box], "text": txt, "score": float(score)}
+                for box, txt, score in zip(found.boxes, found.txts, found.scores, strict=True)
+            ]
+        kept = [r for r in results if not is_tempo_marking(r["text"])]
+
+        def font_size_score(r: dict) -> float:
+            ys = [p[1] for p in r["box"]]
+            return (max(ys) - min(ys)) / len(r["text"]) if r["text"] else 0
+
+        title = cleanup_text(max(kept, key=font_size_score)["text"]) if kept else ""
+        real = _detect_title_task(Debug(original, str(Path(tmp) / "page.png"), False), top_staff)
+    if real != title:
+        raise SystemExit(f"title: unrolled {title!r}, homr {real!r}")
+    return {"crop": {"x": x, "y": y, "width": width, "height": height}, "results": results, "title": title}
+
+
 def golden_dir_for(image_path: Path) -> Path:
     """Private pages live in test/fixtures/local/ and their golden data in
     test/golden/local/; both are git-ignored. Everything else is public."""
@@ -492,6 +531,8 @@ def dump(image_path: Path, config: Config) -> None:
     write_json(out / "staffs.json", staffs)
     if len(staffs) == 0:
         raise SystemExit("No staffs found")
+    title = unrolled_title(predictions.original, staffs[0])
+    write_json(out / "title.json", title)
 
     brace_dot_img = prepare_brace_dot_image(predictions.symbols, predictions.staff)
     write_mask(out / "mask-brace_dot.png", brace_dot_img)
@@ -547,7 +588,7 @@ def dump(image_path: Path, config: Config) -> None:
         voices.append(remove_duplicated_symbols(result_for_voice))
     write_json(out / "voices.json", [symbols_json(v) for v in voices])
 
-    xml = generate_xml(XmlGeneratorArguments(False, None, None), voices, "")
+    xml = generate_xml(XmlGeneratorArguments(False, None, None), voices, title["title"])
     xml.write(str(out / "page.musicxml"))
 
     from importlib.metadata import version

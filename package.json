@@ -36,6 +36,7 @@
     "format": "biome check --write .",
     "golden": ".venv/bin/python tools/dump-golden.py",
     "lint": "biome check .",
+    "ocr": ".venv/bin/python tools/dump-ocr.py",
     "test": "vitest run",
     "vectors": ".venv/bin/python tools/dump-vectors.py"
   },

@@ -15,6 +15,7 @@ CI runs on the public pages alone and a developer's machine runs on all.
 |---|---|---|
 | `the-kesh-300dpi.png` | The Kesh Jig, a traditional Irish tune (public domain), typeset from ABC by AbcMusicStudio's own score renderer and exported to PDF, rasterised at 300 dpi (2481×3509). Same file as `static/tests/pdf2abc/the-kesh-300dpi.png` in the AbcMusicStudio repository. | Public-domain tune, rendering produced by the owner of this repository. |
 | `grand-staff-300dpi.png` | "Grand Staff Study", sixteen bars for piano written for this repository on 2026-10-02: four systems of two braced staffs, treble and bass. Typeset from the ABC below by abcjs 6.6.4, the app's score renderer, loaded from the app's `node_modules` into a standalone HTML page (`ABCJS.renderAbc` with `staffwidth: 700` and `responsive: "resize"` in a 2481×3509 px page padded 150 px at the top and 140 px at each side) and captured by a headless browser screenshot at that size. Not exported through the app's PDF path, unlike the Kesh page. | Music and rendering produced for this repository; no third-party material. |
+| `chord-study-300dpi.png` | "Chord Study", sixteen bars with a chord symbol over most of them, written for this repository on 2026-10-04 for the chord and title OCR of phase 11. Typeset by abcjs 6.6.4 from the app's `node_modules` with the app's own header directives (`ABC_DIRECTIVES` in the app's `abcupdater.ts`: Cinzel titles, Satisfy chord symbols, from Google Fonts), through `tools/typeset-fixture.html`, which holds the ABC, and captured by headless Chrome at 2481×3509 (command below). | Music and rendering produced for this repository; no third-party material. |
 
 ```abc
 X:1
@@ -45,6 +46,16 @@ A,,4 E,4 | E,,4 C,4 | G,,4 G,4 | C,8 |]
 
 The piano page is the fixture with braces: its dump has 25 `brace_dot` boxes
 and four grand staffs, where the Kesh page has neither.
+
+The chord page, from a directory holding `tools/typeset-fixture.html` and
+abcjs 6.6.4's `dist/abcjs-basic-min.js`:
+
+```bash
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new \
+  --disable-gpu --hide-scrollbars --force-device-scale-factor=1 \
+  --window-size=2481,3509 --virtual-time-budget=15000 \
+  --screenshot=chord-study-300dpi.png "file://$PWD/typeset-fixture.html"
+```
 
 Adding a public page: typeset it in the app, export the PDF, rasterise at
 300 dpi, add a row here, run `npm run golden`. Adding a private page: drop
