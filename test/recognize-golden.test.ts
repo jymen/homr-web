@@ -1,7 +1,8 @@
 /**
  * Phase 9's end-to-end check on Node: each fixture page, from its own PNG,
  * through every stage of the port on WebAssembly, against homr's
- * page.musicxml and the app server's staves.json. Nothing here reads a
+ * page.musicxml (title included) and the app server's staves.json and
+ * texts.json. Nothing here reads a
  * Python intermediate; this is the one test where a tolerance accepted in an
  * earlier stage could show up, and the MusicXML is compared exactly
  * (canonically) all the same.
@@ -10,7 +11,7 @@
 import { describe, expect, it } from "vitest";
 import { ModelError } from "../src/models/errors.js";
 import { recognizePage } from "../src/pipeline/recognize.js";
-import type { Progress } from "../src/result.js";
+import type { PageText, Progress } from "../src/result.js";
 import { canonicalXml } from "./support/canonical-xml.js";
 import {
   fixtureImageOf,
@@ -23,6 +24,9 @@ import { testOpenCv } from "./support/opencv.js";
 const PAGE_TIMEOUT_MS = 900_000;
 /** Phase 5: the port's staffs agree with homr's to 2.5e-4 px from its own boxes; normalised by a 1920-px page that is far below 1e-6. */
 const STAFF_DIGITS = 6;
+/** test/ocr-golden.test.ts's tolerances, whose header gives the measured drift behind them. */
+const OCR_BOX_TOLERANCE = 5e-4;
+const OCR_SCORE_TOLERANCE = 0.01;
 
 describeWithModels("recognizePage from the fixture PNG", () => {
   for (const fixture of listGoldenFixtures()) {
@@ -68,10 +72,24 @@ describeWithModels("recognizePage from the fixture PNG", () => {
               );
             }
           }
-          expect(result.texts).toEqual([]);
+          const texts = JSON.parse(reader.text("texts.json")) as PageText[];
+          expect(result.texts.map((t) => [t.staff, t.text])).toEqual(
+            texts.map((t) => [t.staff, t.text])
+          );
+          for (const [i, text] of result.texts.entries()) {
+            const other = texts[i];
+            for (const key of ["x0", "y0", "x1", "y1"] as const) {
+              expect(
+                Math.abs(text[key] - (other?.[key] ?? Number.NaN))
+              ).toBeLessThanOrEqual(OCR_BOX_TOLERANCE);
+            }
+            expect(
+              Math.abs(text.score - (other?.score ?? Number.NaN))
+            ).toBeLessThanOrEqual(OCR_SCORE_TOLERANCE);
+          }
           expect(stages.at(-1)).toEqual({ done: 1, stage: "xml", total: 1 });
           expect(new Set(stages.map((p) => p.stage))).toEqual(
-            new Set(["segment", "detect", "dewarp", "staff", "xml"])
+            new Set(["segment", "detect", "dewarp", "staff", "ocr", "xml"])
           );
         } finally {
           await store.close();

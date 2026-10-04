@@ -107,6 +107,7 @@ export function detectStaffsInImage(
       noise: filtered.outcome,
       notes: noted.notes,
       preprocessed: filtered.predictions.preprocessed,
+      topStaff: top,
     };
   });
 }

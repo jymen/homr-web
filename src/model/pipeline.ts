@@ -185,6 +185,8 @@ export interface PageDetection {
    * unmasked page is the caller's own InputPredictions.
    */
   readonly preprocessed: GrayImage;
+  /** detect_staff's first staff, the one homr's title detection reads above. */
+  readonly topStaff: Staff;
 }
 
 /** The transformer's fixed input size (Config.max_height, max_width): canvas-<n>.png is 1280 x 256. */

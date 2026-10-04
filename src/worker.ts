@@ -17,25 +17,38 @@ import {
   describeError,
   type PipelineOptions,
   recognizePage,
+  recognizeTexts,
 } from "./pipeline/recognize.js";
 import { failedResult, type RecognizeResult } from "./result.js";
 import {
   type HostEvent,
   type InitSettings,
   type PageInput,
+  type PageTask,
   parseCommand,
   type RuntimeReport,
 } from "./worker-protocol.js";
 
-/** The models one page reads; the OCR roles wait for phase 11. */
-const PAGE_ROLES = ["segnet", "encoder", "decoder"] as const;
+/** The models one page reads. */
+const PAGE_ROLES = [
+  "segnet",
+  "encoder",
+  "decoder",
+  "ocrDetect",
+  "ocrClassify",
+  "ocrRecognize",
+] as const;
 
 export interface WorkerEngine {
   close: () => Promise<void>;
   /** Bytes per artifact of every model a page can need, for the `models` stage's total. */
   readonly modelBytes: ReadonlyMap<string, number>;
   /** Decodes and reads one page. Never throws. */
-  read: (page: PageInput, options: PipelineOptions) => Promise<RecognizeResult>;
+  read: (
+    page: PageInput,
+    task: PageTask,
+    options: PipelineOptions
+  ) => Promise<RecognizeResult>;
   readonly report: RuntimeReport;
 }
 
@@ -78,9 +91,20 @@ export const startBrowserEngine: StartEngine = async (settings, onModel) => {
         return [artifactId, artifact.bytes] as const;
       })
     ),
-    read: async (page, options) => {
+    read: async (page, task, options) => {
       try {
-        return await recognizePage(await decodePage(page), engine, options);
+        const image = await decodePage(page);
+        const { minTextScore } = task;
+        return task.kind === "page"
+          ? await recognizePage(image, engine, {
+              ...options,
+              minTextScore,
+              ocr: task.ocr,
+            })
+          : await recognizeTexts(image, task.staves, engine, {
+              ...options,
+              minTextScore,
+            });
       } catch (cause) {
         return failedResult(
           runtime.backend,
@@ -139,7 +163,7 @@ export class WorkerHost {
         this.#init(command.settings).catch(() => undefined);
         return;
       case "recognize":
-        this.#recognize(command.id, command.page);
+        this.#recognize(command.id, command.page, command.task);
         return;
       case "cancel":
         if (this.#job?.id === command.id) {
@@ -182,7 +206,7 @@ export class WorkerHost {
     }
   }
 
-  #recognize(id: number, page: PageInput): void {
+  #recognize(id: number, page: PageInput, task: PageTask): void {
     const state = this.#state;
     if (state.kind !== "ready") {
       this.#post({
@@ -211,7 +235,7 @@ export class WorkerHost {
     };
     this.#job = job;
     this.#running = state.engine
-      .read(page, {
+      .read(page, task, {
         onProgress: (progress) =>
           this.#post({ id, kind: "progress", progress }),
         signal: job.controller.signal,

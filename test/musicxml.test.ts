@@ -95,7 +95,10 @@ describe.each(listGoldenFixtures().map((f) => [f.name, f] as const))(
   "%s: voices.json to page.musicxml",
   (_, fixture) => {
     it("is homr's file, byte for byte", () => {
-      const xml = generateMusicXml(goldenPageOf(fixture).voices(), "");
+      const { title } = JSON.parse(readerFor(fixture).text("title.json")) as {
+        title: string;
+      };
+      const xml = generateMusicXml(goldenPageOf(fixture).voices(), title);
       const expected = readerFor(fixture).text("page.musicxml");
       expect(canonicalXml(xml)).toEqual(canonicalXml(expected));
       expect(xml).toBe(expected);

@@ -12,12 +12,14 @@ import {
   type Progress,
   type RecognizeError,
   type RecognizeResult,
+  type StaffBox,
 } from "./result.js";
 import {
   type HostCommand,
   type HostEvent,
   isPageInput,
   type PageInput,
+  type PageTask,
   parseEvent,
   type RuntimeReport,
 } from "./worker-protocol.js";
@@ -35,11 +37,24 @@ export interface RecognizerOptions {
   readonly wasmPaths?: string | URL;
 }
 
-export interface RecognizeOptions {
+export interface TextOptions {
+  /**
+   * RapidOCR's text_score for the chord strips: a line scoring below it is
+   * dropped. Default 0.5, the server's, so `texts` equals the server route's.
+   * The AbcMusicStudio app keeps texts at 0.6 and above.
+   */
+  readonly minTextScore?: number;
   readonly onProgress?: (progress: Progress) => void;
   /** Aborting settles the page at once as `cancelled`, or `timeout` when the reason is a TimeoutError. */
   readonly signal?: AbortSignal;
 }
+
+export interface RecognizeOptions extends TextOptions {
+  /** Read the chord strips and the title. Default true; false leaves `texts` empty and `work-title` blank, and never loads the OCR models. */
+  readonly ocr?: boolean;
+}
+
+const DEFAULT_MIN_TEXT_SCORE = 0.5;
 
 export interface Recognizer {
   /** Chosen by the Worker before any model byte moved; fixed for this recognizer's life. */
@@ -50,6 +65,16 @@ export interface Recognizer {
   dispose: () => Promise<void>;
   /** WebAssembly threads the runtime applied; 1 when the page is not cross-origin isolated. */
   readonly numThreads: number;
+  /**
+   * The chord strips above `staves` alone, as the server's route reads them:
+   * `musicXml` is empty and `staves` are the ones given. Shares the one-page
+   * rule and never rejects.
+   */
+  readTextStrips: (
+    page: PageInput,
+    staves: readonly StaffBox[],
+    options?: TextOptions
+  ) => Promise<RecognizeResult>;
   /**
    * Never rejects. One page at a time: a second call while one runs answers
    * `busy`. A page asked for right after a cancel is accepted and waits for
@@ -110,6 +135,36 @@ class WorkerRecognizer implements Recognizer {
     page: PageInput,
     options: RecognizeOptions = {}
   ): Promise<RecognizeResult> {
+    return this.#read(page, options, {
+      kind: "page",
+      minTextScore: options.minTextScore ?? DEFAULT_MIN_TEXT_SCORE,
+      ocr: options.ocr ?? true,
+    });
+  }
+
+  readTextStrips(
+    page: PageInput,
+    staves: readonly StaffBox[],
+    options: TextOptions = {}
+  ): Promise<RecognizeResult> {
+    return this.#read(page, options, {
+      kind: "texts",
+      minTextScore: options.minTextScore ?? DEFAULT_MIN_TEXT_SCORE,
+      staves: staves.map(({ cx, cy, h, index, w }) => ({
+        cx,
+        cy,
+        h,
+        index,
+        w,
+      })),
+    });
+  }
+
+  #read(
+    page: PageInput,
+    options: TextOptions,
+    task: PageTask
+  ): Promise<RecognizeResult> {
     const { onProgress, signal } = options;
     const fail = (error: RecognizeError, log: string) =>
       Promise.resolve(failedResult(this.backend, error, log));
@@ -159,7 +214,9 @@ class WorkerRecognizer implements Recognizer {
       };
       signal?.addEventListener("abort", onAbort, { once: true });
       // A cancelled page may still be running in the Worker; this one waits for it.
-      this.#workerIdle.then(() => this.#start(id, page)).catch(() => undefined);
+      this.#workerIdle
+        .then(() => this.#start(id, page, task))
+        .catch(() => undefined);
     });
   }
 
@@ -168,7 +225,7 @@ class WorkerRecognizer implements Recognizer {
     return this.#disposing;
   }
 
-  #start(id: number, page: PageInput): void {
+  #start(id: number, page: PageInput, task: PageTask): void {
     if (this.#live?.id !== id || this.#dead !== undefined) {
       return;
     }
@@ -177,7 +234,7 @@ class WorkerRecognizer implements Recognizer {
       done = resolve;
     });
     this.#inWorker = { done, id };
-    this.#post({ id, kind: "recognize", page });
+    this.#post({ id, kind: "recognize", page, task });
   }
 
   #settle(id: number, result: RecognizeResult): void {

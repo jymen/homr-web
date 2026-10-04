@@ -9,6 +9,7 @@ export type {
   RecognizeOptions,
   Recognizer,
   RecognizerOptions,
+  TextOptions,
 } from "./client.js";
 export { createRecognizer } from "./client.js";
 export type {

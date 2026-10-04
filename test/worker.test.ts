@@ -15,12 +15,15 @@ import {
   type RecognizeResult,
 } from "../src/result.js";
 import { type StartEngine, WorkerHost } from "../src/worker.js";
-import type { InitSettings } from "../src/worker-protocol.js";
+import type { InitSettings, PageTask } from "../src/worker-protocol.js";
 
 interface Read {
   readonly finish: (result: RecognizeResult) => void;
   readonly options: PipelineOptions;
+  readonly task: PageTask;
 }
+
+const PAGE_TASK: PageTask = { kind: "page", minTextScore: 0.5, ocr: true };
 
 const success = (log: string): RecognizeResult => ({
   backend: "wasm",
@@ -57,9 +60,9 @@ function harness(fail?: string) {
         ["segnet", 100],
         ["encoder", 300],
       ]),
-      read: (_page, options) =>
+      read: (_page, task, options) =>
         new Promise<RecognizeResult>((finish) =>
-          reads.push({ finish, options })
+          reads.push({ finish, options, task })
         ),
       report: { backend: "wasm", numThreads: 1, reason: "test" },
     });
@@ -144,6 +147,46 @@ describe("recognizePage", () => {
     read?.finish(success("read"));
     expect(await pending).toEqual(success("read"));
     expect(progress).toEqual([{ done: 1, stage: "segment", total: 4 }]);
+  });
+
+  it("asks the Worker for the whole page with OCR at the server's threshold by default", async () => {
+    const h = harness();
+    const recognizer = await started(h);
+    const pending = recognizer.recognizePage(page());
+    await tick();
+    expect(h.reads[0]?.task).toEqual(PAGE_TASK);
+    h.reads[0]?.finish(success("read"));
+    await pending;
+    const second = recognizer.recognizePage(page(), {
+      minTextScore: 0.6,
+      ocr: false,
+    });
+    await tick();
+    expect(h.reads[1]?.task).toEqual({
+      kind: "page",
+      minTextScore: 0.6,
+      ocr: false,
+    });
+    h.reads[1]?.finish(success("read"));
+    await second;
+  });
+
+  it("reads text strips above the caller's staves through the same one-page rule", async () => {
+    const h = harness();
+    const recognizer = await started(h);
+    const staves = [{ cx: 0.5, cy: 0.2, h: 0.03, index: 0, w: 0.8 }];
+    const pending = recognizer.readTextStrips(page(), staves);
+    await tick();
+    expect(h.reads[0]?.task).toEqual({
+      kind: "texts",
+      minTextScore: 0.5,
+      staves,
+    });
+    expect(await recognizer.recognizePage(page())).toMatchObject({
+      error: "busy",
+    });
+    h.reads[0]?.finish(success("texts"));
+    expect(await pending).toEqual(success("texts"));
   });
 
   it("reports model bytes as the models stage, against every model's size", async () => {
@@ -291,7 +334,7 @@ describe("WorkerHost", () => {
       settings: { baseUrl: "http://x/", prefer: "wasm", wasmPaths: null },
     });
     await tick();
-    host.handle({ id: 1, kind: "recognize", page: page() });
+    host.handle({ id: 1, kind: "recognize", page: page(), task: PAGE_TASK });
     await tick();
     expect(events.at(-1)).toMatchObject({
       kind: "result",
@@ -306,8 +349,19 @@ describe("WorkerHost", () => {
       () => Promise.reject(new Error("unused"))
     );
     host.handle({ kind: "fly" });
-    host.handle({ id: 3, kind: "recognize", page: page() });
-    host.handle({ id: 4, kind: "recognize", page: "page.png" });
+    host.handle({ id: 3, kind: "recognize", page: page(), task: PAGE_TASK });
+    host.handle({
+      id: 4,
+      kind: "recognize",
+      page: "page.png",
+      task: PAGE_TASK,
+    });
+    host.handle({
+      id: 5,
+      kind: "recognize",
+      page: page(),
+      task: { kind: "texts", minTextScore: 0.5, staves: [{ cx: 1 }] },
+    });
     await tick();
     expect(events).toEqual([
       {
@@ -321,6 +375,12 @@ describe("WorkerHost", () => {
         kind: "error",
         message:
           "a homr-web worker cannot serve a recognize whose page is not a Blob, ImageBitmap or ImageData",
+      },
+      {
+        id: null,
+        kind: "error",
+        message:
+          "a homr-web worker cannot serve a recognize whose task is not a page or a texts task",
       },
     ]);
   });

@@ -9,6 +9,7 @@ import {
   type Backend,
   type Progress,
   type RecognizeResult,
+  type StaffBox,
 } from "./result.js";
 
 export type PageInput = Blob | ImageBitmap | ImageData;
@@ -20,12 +21,26 @@ export interface InitSettings {
   readonly wasmPaths: string | null;
 }
 
+/** What to read on a page: everything, or the chord strips above staves the caller has. */
+export type PageTask =
+  | {
+      readonly kind: "page";
+      readonly minTextScore: number;
+      readonly ocr: boolean;
+    }
+  | {
+      readonly kind: "texts";
+      readonly minTextScore: number;
+      readonly staves: readonly StaffBox[];
+    };
+
 export type HostCommand =
   | { readonly kind: "init"; readonly settings: InitSettings }
   | {
       readonly kind: "recognize";
       readonly id: number;
       readonly page: PageInput;
+      readonly task: PageTask;
     }
   /** `timeout` when the caller's signal aborted with a TimeoutError, so the result says `timeout`. */
   | { readonly id: number; readonly kind: "cancel"; readonly timeout: boolean }
@@ -100,11 +115,49 @@ function parseSettings(value: unknown): InitSettings | undefined {
   return { baseUrl, prefer, wasmPaths };
 }
 
+const isFiniteNumber = (value: unknown): value is number =>
+  typeof value === "number" && Number.isFinite(value);
+
+function parseStaffBox(value: unknown): StaffBox | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const { cx, cy, h, index, w } = value;
+  return isFiniteNumber(cx) &&
+    isFiniteNumber(cy) &&
+    isFiniteNumber(h) &&
+    isFiniteNumber(w) &&
+    isId(index)
+    ? { cx, cy, h, index, w }
+    : undefined;
+}
+
+function parseTask(value: unknown): PageTask | undefined {
+  if (!(isRecord(value) && isFiniteNumber(value.minTextScore))) {
+    return undefined;
+  }
+  const { kind, minTextScore } = value;
+  if (kind === "page") {
+    return typeof value.ocr === "boolean"
+      ? { kind, minTextScore, ocr: value.ocr }
+      : undefined;
+  }
+  if (kind !== "texts" || !Array.isArray(value.staves)) {
+    return undefined;
+  }
+  const staves = value.staves
+    .map(parseStaffBox)
+    .filter((staff): staff is StaffBox => staff !== undefined);
+  return staves.length === value.staves.length
+    ? { kind, minTextScore, staves }
+    : undefined;
+}
+
 export function parseCommand(data: unknown): Parsed<HostCommand> {
   if (!isRecord(data)) {
     return refuse(`a message that is ${data === null ? "null" : typeof data}`);
   }
-  const { id, kind, page, settings, timeout } = data;
+  const { id, kind, page, settings, task, timeout } = data;
   if (kind === "close") {
     return accept({ kind });
   }
@@ -123,9 +176,15 @@ export function parseCommand(data: unknown): Parsed<HostCommand> {
   if (kind === "cancel") {
     return accept({ id, kind, timeout: timeout === true });
   }
-  return isPageInput(page)
-    ? accept({ id, kind, page })
-    : refuse("a recognize whose page is not a Blob, ImageBitmap or ImageData");
+  if (!isPageInput(page)) {
+    return refuse(
+      "a recognize whose page is not a Blob, ImageBitmap or ImageData"
+    );
+  }
+  const parsedTask = parseTask(task);
+  return parsedTask === undefined
+    ? refuse("a recognize whose task is not a page or a texts task")
+    : accept({ id, kind, page, task: parsedTask });
 }
 
 /**

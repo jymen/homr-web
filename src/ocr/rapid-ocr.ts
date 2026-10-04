@@ -265,6 +265,17 @@ function normalizedLine(
 const byAspect = (images: readonly ColorImage[]): Int32Array =>
   npArgsort(images.map((image) => image.width / image.height));
 
+/**
+ * A turn of the event loop. onnxruntime-web's wasm runs settle as microtasks,
+ * so a page's OCR, a hundred runs or so, would otherwise hold off every
+ * message to its realm: a Worker's cancel, and vitest's own RPC, which times
+ * out after 60 s (measured: test/ocr-golden.test.ts alone tripped it).
+ */
+const nextTask = (): Promise<void> =>
+  new Promise((resolve) => {
+    setTimeout(resolve, 0);
+  });
+
 async function runSingle(
   session: ModelSession,
   input: Tensor
@@ -281,6 +292,7 @@ async function runSingle(
     );
   }
   const outputs = await session.session.run({ [inputSpec.name]: input });
+  await nextTask();
   const tensor = outputs[output.name];
   if (tensor === undefined) {
     throw new ModelError(

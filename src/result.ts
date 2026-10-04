@@ -30,7 +30,7 @@ export interface StaffBox {
   readonly w: number;
 }
 
-/** The server's `OmrText`: a chord or title read above staff `staff`, box page-normalised. Always empty until the browser has OCR. */
+/** The server's `OmrText`: a chord or title read in the strip above staff `staff`, box page-normalised, score rounded to 3 digits. */
 export interface PageText {
   readonly score: number;
   readonly staff: number;
@@ -42,11 +42,13 @@ export interface PageText {
 }
 
 /**
- * `models` counts bytes of the three models, cached ones as done, on the first
- * page a recognizer reads. The segmentation model opens before `segment` and
- * the other two after `detect`, so `models` appears twice on a first page, and
- * a page that is not music stops short of the total; `segment` counts segnet batches,
- * `dewarp` and `staff` count staffs, `detect` and `xml` go from 0/1 to 1/1.
+ * `models` counts bytes of the six models, cached ones as done, on the first
+ * page a recognizer reads. The segmentation model opens before `segment`, the
+ * transformer's two after `detect` and the three OCR models before `ocr`, so
+ * `models` appears three times on a first page, and a page that is not music,
+ * or read with `ocr: false`, stops short of the total. `segment` counts segnet
+ * batches, `dewarp` and `staff` count staffs, `ocr` counts the chord strips
+ * and the title band, `detect` and `xml` go from 0/1 to 1/1.
  */
 export const PROGRESS_STAGES = [
   "models",
@@ -54,6 +56,7 @@ export const PROGRESS_STAGES = [
   "detect",
   "dewarp",
   "staff",
+  "ocr",
   "xml",
 ] as const;
 export type ProgressStage = (typeof PROGRESS_STAGES)[number];
