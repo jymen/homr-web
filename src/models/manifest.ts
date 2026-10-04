@@ -141,25 +141,33 @@ export const MODEL_ROLES = {
       kind: "gpu",
     },
   },
+  // The three OCR models run fp32 on the WebGPU EP (no fp16 artifact exists).
+  // Measured in the bench's Worker, Chrome, apple metal-3, warm, on the three
+  // public pages: the ocr stage 3.1 to 3.3 s against 4.7 to 5.3 s on four wasm
+  // threads, every text and box equal to the server's either way
+  // (docs/decisions.tsv, phase 11).
   ocrClassify: {
     cpu: "ppocr-v2-cls-mobile",
     onWebgpu: {
-      kind: "stay-on-cpu",
-      why: "0.6 MB and one run per strip: the CPU EP is not the cost",
+      artifact: "ppocr-v2-cls-mobile",
+      keepOutputsOnGpu: [],
+      kind: "gpu",
     },
   },
   ocrDetect: {
     cpu: "ppocr-v6-det-small",
     onWebgpu: {
-      kind: "stay-on-cpu",
-      why: "PP-OCR on the WebGPU EP is unmeasured; phase 11 measures it and this row is where the answer goes",
+      artifact: "ppocr-v6-det-small",
+      keepOutputsOnGpu: [],
+      kind: "gpu",
     },
   },
   ocrRecognize: {
     cpu: "ppocr-v6-rec-small",
     onWebgpu: {
-      kind: "stay-on-cpu",
-      why: "PP-OCR on the WebGPU EP is unmeasured; phase 11 measures it and this row is where the answer goes",
+      artifact: "ppocr-v6-rec-small",
+      keepOutputsOnGpu: [],
+      kind: "gpu",
     },
   },
   segnet: {
