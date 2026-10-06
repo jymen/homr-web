@@ -1,6 +1,6 @@
 {
   "name": "homr-web",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Browser port of homr, the optical music recognition engine: sheet music image in, MusicXML and the chord symbols above each staff out, no server.",
   "homepage": "https://github.com/jymen/homr-web",
   "repository": {

@@ -53,23 +53,37 @@ export async function readStripTexts(
 }
 
 const MIN_TITLE_LETTERS = 4;
+const LETTER = /\p{L}/u;
+/** Everything a title does not keep: not a letter, mark, digit, apostrophe or hyphen. */
+const NOT_TITLE_TEXT = /[^\p{L}\p{M}\p{N}'’-]+/gu;
 
-/** title_detection.is_tempo_marking: under four characters, or under four Latin letters. */
-function isTempoMarking(text: string): boolean {
+/**
+ * title_detection.is_tempo_marking: under four characters, or under four
+ * letters. Deliberately not homr's: homr counts only a to z, so a title in
+ * another alphabet read as a tempo marking and was dropped. Any letter counts
+ * here, in any alphabet. A tempo marking still has none or one: the
+ * RapidOCR models read the note of "♩=85" as 小, one letter.
+ */
+export function isTempoMarking(text: string): boolean {
   const characters = [...text];
   if (characters.length < MIN_TITLE_LETTERS) {
     return true;
   }
-  const letters = characters.filter((c) => {
-    const lower = c.toLowerCase();
-    return lower >= "a" && lower <= "z";
-  }).length;
+  const letters = characters.filter((c) => LETTER.test(c)).length;
   return letters < MIN_TITLE_LETTERS;
 }
 
-/** title_detection.cleanup_text. */
-const cleanupText = (text: string): string =>
-  text.replace(/[^a-zA-Z0-9]+/g, " ").trim();
+/**
+ * title_detection.cleanup_text, deliberately not homr's. homr keeps only a to
+ * z and digits, which turned "Marche des élèves" into "Marche des l ves" and
+ * "Le p'tit Sarny" into "Le p tit Sarny". This keeps letters and digits of
+ * any alphabet, apostrophes and hyphens, and reduces everything else to
+ * single spaces, as homr does. NFC first, so an accent read as a separate
+ * combining mark stays on its letter. Titles in a to z come out exactly as
+ * homr's (docs/decisions.tsv, 2026-10-06).
+ */
+export const cleanupText = (text: string): string =>
+  text.normalize("NFC").replace(NOT_TITLE_TEXT, " ").trim();
 
 /** The crop _detect_title_task reads: 15 unit sizes above the first staff, 50 px wider each side. */
 export function titleCrop(original: ColorImage, top: Staff): ColorImage {

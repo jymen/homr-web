@@ -183,12 +183,16 @@ which is slower. `recognizer.backendReason` says which case applies.
 | transformer | `pytorch_model_396-f6feedb42ff90087d898b0941a55d040fa6b2903` (encoder and decoder) |
 | chord and title OCR | RapidOCR 3.9.2's default pipeline, and the AbcMusicStudio server's strip geometry (`omr_chord_ocr.py`) |
 
-`HOMR_VERSION` and `HOMR_COMMIT` are exported. Two behaviours differ from
+`HOMR_VERSION` and `HOMR_COMMIT` are exported. Three behaviours differ from
 running homr on the command line. A multi-page input is one call per page; homr 0.7.0
-does not join pages either. And the image is decoded by the browser without
+does not join pages either. The image is decoded by the browser without
 colour management and with its alpha channel dropped, as `cv2.imread` does,
 so a transparent pixel reads as its stored colour: flatten a transparent
-image onto white before passing it.
+image onto white before passing it. And the title keeps letters of any
+alphabet, apostrophes and hyphens, where homr keeps only `a` to `z` and
+digits: homr turns "Marche des élèves" into "Marche des l ves", and drops a
+title in another alphabet as a tempo marking. A title in `a` to `z` comes
+out exactly as homr's (`test/title-text.test.ts`).
 
 Two differences inside the pipeline are known and pinned by tests. opencv.js
 fits another rectangle than opencv-python to two noteheads of the piano test
