@@ -49,6 +49,16 @@ while [[ $# -gt 0 ]]; do
 done
 
 step() { printf '\n== %s\n' "$*"; }
+
+# Whether the registry holds this exact version. Asked of the version's own
+# document with caching refused: `npm view` reads the package listing through
+# npmjs.org's CDN, which went on answering the previous version for minutes
+# after 0.2.1 was published (2026-10-06), so the old check said "not there"
+# about a publish that had worked.
+on_registry() {
+  [[ "$(curl -s -o /dev/null -w '%{http_code}' -H 'Cache-Control: no-cache' \
+    "https://registry.npmjs.org/${name}/${version}")" == "200" ]]
+}
 fail() { echo "npm-publish: $*" >&2; exit 1; }
 
 name=$(node -p "require('./package.json').name")
@@ -76,8 +86,7 @@ git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null \
 echo "clean, main = origin/main, ${tag} pushed and HEAD ships the same files"
 
 step "npm"
-published=$(npm view "${name}@${version}" version 2>/dev/null || true)
-if [[ "$published" == "$version" ]]; then
+if on_registry; then
   echo "${name}@${version} is already on npm; nothing to do"
   exit 0
 fi
@@ -149,8 +158,7 @@ fi
 
 step "Verify"
 for _ in 1 2 3 4 5 6; do
-  now=$(npm view "${name}@${version}" version 2>/dev/null || true)
-  [[ "$now" == "$version" ]] && { echo "${name}@${version} is on npm"; exit 0; }
+  on_registry && { echo "${name}@${version} is on npm (npm view may lag a few minutes behind)"; exit 0; }
   sleep 5
 done
-fail "npm publish returned, but npm view does not list ${version} yet; check https://www.npmjs.com/package/${name}"
+fail "npm publish returned, but the registry does not hold ${version} yet; check https://www.npmjs.com/package/${name}"
