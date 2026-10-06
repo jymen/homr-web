@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Publish the version in package.json to npm, and only that version.
 #
-# Usage: tools/npm-publish.sh [--check-only] [--skip-tests] [--yes] [--otp CODE]
+# Usage: tools/npm-publish.sh [--check-only] [--skip-tests] [--yes] [--otp CODE | --web]
 #
 #   --check-only  run every check and the pack dry run, publish nothing
 #   --skip-tests  skip the test suite (about ten minutes with the models);
@@ -9,6 +9,9 @@
 #   --yes         do not ask for confirmation before publishing
 #   --otp CODE    one-time code for an npm account with two-factor auth
 #                 (HOMR_NPM_OTP in the environment works too)
+#   --web         approve the publish in the browser instead (npm
+#                 --auth-type=web): the way for a passkey or security key.
+#                 npm prints a link and waits, so run it from a terminal
 #
 # What it refuses, each before anything is published:
 #   - a working tree with changes, a branch other than main, or a main that
@@ -31,13 +34,15 @@ check_only=false
 skip_tests=false
 assume_yes=false
 otp="${HOMR_NPM_OTP:-}"
+web=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --check-only) check_only=true ;;
     --skip-tests) skip_tests=true ;;
     --yes) assume_yes=true ;;
     --otp) shift; otp="${1:-}" ;;
-    -h|--help) sed -n '2,25p' "$0"; exit 0 ;;
+    --web) web=true ;;
+    -h|--help) sed -n '2,29p' "$0"; exit 0 ;;
     *) echo "npm-publish: unknown option $1" >&2; exit 2 ;;
   esac
   shift
@@ -135,8 +140,11 @@ fi
 step "Publish"
 if [[ -n "$otp" ]]; then
   npm publish --otp "$otp"
+elif $web; then
+  [[ -t 0 && -t 1 ]] || fail "--web needs a terminal: npm prints a link to approve in the browser, then waits"
+  npm publish --auth-type=web
 else
-  npm publish
+  npm publish || fail "npm publish failed; an EOTP error means two-factor: pass --otp <code>, or --web from a terminal for a passkey or security key"
 fi
 
 step "Verify"
