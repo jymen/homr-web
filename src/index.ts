@@ -22,6 +22,7 @@ export type {
   RecognizeResult,
   RecognizeSuccess,
   StaffBox,
+  TabSystem,
 } from "./result.js";
 export { BACKENDS, PROGRESS_STAGES, RECOGNIZE_ERRORS } from "./result.js";
 export { HOMR_COMMIT, HOMR_VERSION } from "./version.js";

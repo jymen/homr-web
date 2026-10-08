@@ -50,7 +50,7 @@ export interface TextOptions {
 }
 
 export interface RecognizeOptions extends TextOptions {
-  /** Read the chord strips and the title. Default true; false leaves `texts` empty and `work-title` blank, and never loads the OCR models. */
+  /** Read the chord strips and the title. Default true; false leaves `texts` empty and `work-title` blank, and never loads the OCR models but the recogniser the tab guard needs on a page with a five-line tablature candidate. */
   readonly ocr?: boolean;
 }
 
@@ -166,8 +166,10 @@ class WorkerRecognizer implements Recognizer {
     task: PageTask
   ): Promise<RecognizeResult> {
     const { onProgress, signal } = options;
-    const fail = (error: RecognizeError, log: string) =>
-      Promise.resolve(failedResult(this.backend, error, log));
+    const fail = (
+      error: Exclude<RecognizeError, "tablature_only">,
+      log: string
+    ) => Promise.resolve(failedResult(this.backend, error, log));
     if (this.#disposing !== undefined) {
       return fail("cancelled", "the recognizer was disposed");
     }

@@ -836,6 +836,9 @@ async function recognizeWithPublicApi() {
       out(
         `staves: ${result.staves.length} against ${staves.length} in staves.json, largest difference ${worst.toExponential(2)}`
       );
+      out(
+        `tablature: ${result.tablature.length} systems${result.tablature.length === 0 ? "" : " (A GOLDEN PAGE HAS NONE)"}`
+      );
       const sameTexts =
         JSON.stringify(result.texts.map((t) => [t.staff, t.text])) ===
         JSON.stringify(texts.map((t) => [t.staff, t.text]));

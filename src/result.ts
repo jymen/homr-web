@@ -2,7 +2,13 @@
  * What the library answers with: the app server's `OmrRecognizeResult`
  * (AbcGoDb, abcsql/omr.go) field for field, plus `backend`, so the app's
  * transcriber page reads a browser result and a server result the same way.
+ * `tablature` is browser-only for now: the server has no tab guard, so its
+ * result has no such field.
  */
+
+import type { TabSystem } from "./tab/detect.js";
+
+export type { TabSystem } from "./tab/detect.js";
 
 export const BACKENDS = ["webgpu", "wasm-threads", "wasm"] as const;
 /** Chosen once per Worker by startRuntime and frozen before the first session. */
@@ -45,8 +51,10 @@ export interface PageText {
  * `models` counts bytes of the six models, cached ones as done, on the first
  * page a recognizer reads. The segmentation model opens before `segment`, the
  * transformer's two after `detect` and the three OCR models before `ocr`, so
- * `models` appears three times on a first page, and a page that is not music,
- * or read with `ocr: false`, stops short of the total. `segment` counts segnet
+ * `models` appears three times on a first page (four when the tab guard opens
+ * the OCR recogniser first, on a page with a five-line tablature candidate),
+ * and a page that is not music, or read with `ocr: false`, stops short of the
+ * total. `segment` counts segnet
  * batches, `dewarp` and `staff` count staffs, `ocr` counts the chord strips
  * and the title band, `detect` and `xml` go from 0/1 to 1/1.
  */
@@ -76,7 +84,8 @@ export interface Progress {
  * what `AbortSignal.timeout` does; `busy` is a second page asked for while
  * one is running; `worker_lost` means the Worker crashed or broke the
  * protocol, and this recognizer answers nothing else from then on: dispose it
- * and create another.
+ * and create another. `tablature_only` is a page whose every system is line
+ * tablature, which homr cannot read: the result's `tablature` lists them.
  */
 export const RECOGNIZE_ERRORS = [
   "bad_input",
@@ -85,6 +94,7 @@ export const RECOGNIZE_ERRORS = [
   "engine_failed",
   "engine_missing",
   "not_music",
+  "tablature_only",
   "timeout",
   "worker_lost",
 ] as const;
@@ -103,23 +113,35 @@ export interface RecognizeSuccess extends ResultBase {
   readonly musicXml: string;
   readonly ok: true;
   readonly staves: readonly StaffBox[];
+  /** The tab systems found and kept out of homr's reading, empty on a page without any. Never in `staves`. */
+  readonly tablature: readonly TabSystem[];
   readonly texts: readonly PageText[];
 }
 
-export interface RecognizeFailure extends ResultBase {
-  readonly error: RecognizeError;
+interface FailureBase extends ResultBase {
   readonly musicXml: "";
   readonly ok: false;
   readonly staves: readonly [];
   readonly texts: readonly [];
 }
 
+/** Only a `tablature_only` failure carries systems, and it always carries at least one. */
+export type RecognizeFailure =
+  | (FailureBase & {
+      readonly error: Exclude<RecognizeError, "tablature_only">;
+      readonly tablature: readonly [];
+    })
+  | (FailureBase & {
+      readonly error: "tablature_only";
+      readonly tablature: readonly [TabSystem, ...TabSystem[]];
+    });
+
 /** Failure is a result, never a thrown error, as on the server: the page keeps one shape. */
 export type RecognizeResult = RecognizeSuccess | RecognizeFailure;
 
 export const failedResult = (
   backend: Backend,
-  error: RecognizeError,
+  error: Exclude<RecognizeError, "tablature_only">,
   log: string,
   durationMs = 0
 ): RecognizeFailure => ({
@@ -131,6 +153,25 @@ export const failedResult = (
   musicXml: "",
   ok: false,
   staves: [],
+  tablature: [],
+  texts: [],
+});
+
+export const tablatureOnlyResult = (
+  backend: Backend,
+  tablature: readonly [TabSystem, ...TabSystem[]],
+  log: string,
+  durationMs: number
+): RecognizeFailure => ({
+  backend,
+  durationMs,
+  engine: "browser",
+  error: "tablature_only",
+  log,
+  musicXml: "",
+  ok: false,
+  staves: [],
+  tablature,
   texts: [],
 });
 

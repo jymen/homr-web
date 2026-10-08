@@ -34,6 +34,7 @@ const success = (log: string): RecognizeResult => ({
   musicXml: "<score-partwise />",
   ok: true,
   staves: [{ cx: 0.5, cy: 0.5, h: 0.1, index: 0, w: 0.9 }],
+  tablature: [],
   texts: [],
 });
 

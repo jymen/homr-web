@@ -35,6 +35,7 @@ if (result.ok) {
   render(result.musicXml); // MusicXML 4.0, one part per voice, homr's title in work-title
   console.log(result.staves); // [{ index, cx, cy, w, h }], page-normalised, top to bottom
   console.log(result.texts); // [{ staff, text, score, x0, y0, x1, y1 }], the chords above each staff
+  console.log(result.tablature); // [{ index, lines, cx, cy, w, h }], tab systems kept out of the reading
 } else {
   console.warn(result.error, result.log);
 }
@@ -50,6 +51,7 @@ with `ok: false` and one of these codes in `error`:
 |---|---|
 | `bad_input` | the image could not be decoded |
 | `not_music` | homr found no staff or no notehead on the page |
+| `tablature_only` | every system on the page is line tablature, which homr cannot read; `tablature` lists them |
 | `engine_missing` | a model could not be downloaded or did not match its hash |
 | `engine_failed` | anything else went wrong inside the engine |
 | `busy` | this recognizer is still reading another page |
@@ -59,7 +61,7 @@ with `ok: false` and one of these codes in `error`:
 
 The result has the shape of the AbcMusicStudio server's homr route (`engine`,
 `ok`, `error`, `musicXml`, `log`, `durationMs`, `staves`, `texts`) plus
-`backend`. `texts` holds what RapidOCR reads in the strip from 1.9 to 0.05
+`backend` and `tablature`, which the server does not have yet. `texts` holds what RapidOCR reads in the strip from 1.9 to 0.05
 staff heights above each staff, 3 % of the page wider on the left and 2 % on
 the right: one entry per line of text, its box normalised to the page and
 rounded to 4 digits, its score to 3, sorted by staff and then from left to
@@ -69,6 +71,28 @@ app keeps texts at 0.6 and above). Chord symbols come out as the recogniser
 reads them, which is not always as typeset: on the chord test page `F♯m` reads
 `7#m` and `Em` is missed twice, on the server as here. A failure of the OCR alone never fails the page: `texts` is
 empty, `work-title` blank, and the reason is a line of `log`.
+
+### Tablature
+
+homr has no notion of tablature. Given a tab, it reads the tab lines as a
+staff and invents notes on them, and a staff with its tab underneath comes
+out as a piano grand staff whose bass staff is the tab. So before homr
+reads the page, a guard finds the tab systems and paints them white:
+`staves` and the MusicXML then hold the standard staves alone, and
+`tablature` lists the tab systems (`lines`, 4 to 6, and the extent of the
+lines, page-normalised like `staves`, `index` from the top). A page with
+nothing but tabs answers `tablature_only` with its systems, rather than
+notes that are not there.
+
+A system is a run of four to six evenly spaced horizontal lines. Four or six
+lines is a tab; five lines is a tab when the marks sitting on its lines read
+as numbers, which RapidOCR's recogniser decides from a sample of at most
+twelve of them. A page with no five-line group carrying such marks never
+loads the recogniser. Nothing is read from the tab yet: no frets, strings,
+tuning or rhythm. Detection is measured on 15 pages at 300 dpi (banjo,
+mandolin and guitar PDFs, one of them a scan), 56 tab systems out of 56; it
+finds nothing on a low-resolution phone photograph (lines 5 px apart), where
+homr reads the tab as before.
 
 To read the strips alone above staves you already have, for example the
 server's:
@@ -83,8 +107,10 @@ page only), `segment` (tiles), `detect`, `dewarp` and `staff` (one each per
 staff), `ocr` (one per staff, and one for the title), and `xml`. On a first
 page `models` appears three times, before `segment` for the segmentation
 model, after `detect` for the transformer and before `ocr` for the three OCR
-models; a page that is not music never downloads the transformer, and
-`{ ocr: false }` never downloads the OCR models. On an Apple M-series laptop with WebGPU a page takes 7 to
+models, and a fourth time first of all when the tab guard needs the OCR
+recogniser; a page that is not music never downloads the transformer, and
+`{ ocr: false }` never downloads the OCR models, except the recogniser on a
+page with a five-line tablature candidate. On an Apple M-series laptop with WebGPU a page takes 7 to
 9 seconds once the models are cached, of which the OCR is about 3 seconds
 (about 5 on WebAssembly threads); `readTextStrips` alone takes about 2.5
 seconds. Under Node on one WebAssembly thread a page takes about 55 seconds,

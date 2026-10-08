@@ -25,6 +25,7 @@ const PORT_MEMBERS = [
   "boundingRect",
   "calcHist",
   "CLAHE",
+  "connectedComponentsWithStats",
   "contourArea",
   "cvtColor",
   "dilate",

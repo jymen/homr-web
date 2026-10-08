@@ -2,7 +2,8 @@
  * homr's process_image without file IO or debug images, then the app server's
  * chord OCR: one BGR page in, the app server's result shape out. The Worker
  * and the Node golden test both call `recognizePage`; neither has to know
- * what a stage is.
+ * what a stage is. Before homr, the tab guard paints line tablature white,
+ * so homr never reads a tab as a staff.
  */
 
 import type { OpenCv } from "../cv/opencv.js";
@@ -13,8 +14,9 @@ import { ModelError } from "../models/errors.js";
 import type { ModelRole } from "../models/manifest.js";
 import type { ModelSession } from "../models/session.js";
 import { generateMusicXml } from "../musicxml/generate.js";
+import { ctcCharacters } from "../ocr/ctc.js";
 import { detectTitle, readStripTexts } from "../ocr/page.js";
-import { RapidOcr } from "../ocr/rapid-ocr.js";
+import { RapidOcr, recognizeCrops } from "../ocr/rapid-ocr.js";
 import {
   type Backend,
   failedResult,
@@ -24,9 +26,17 @@ import {
   type RecognizeError,
   type RecognizeResult,
   type StaffBox,
+  tablatureOnlyResult,
 } from "../result.js";
 import { preprocessPage } from "../segmentation/preprocess.js";
 import { DEFAULT_SEGNET_BATCH, segmentPage } from "../segmentation/segment.js";
+import {
+  type DetectedTab,
+  detectTablature,
+  type ReadCrops,
+  type TabSystem,
+  whitenTablature,
+} from "../tab/detect.js";
 import { detectStaffsInImage } from "./detect.js";
 import { parseStaffs } from "./parse-staffs.js";
 import { staffBoxes, staffPositions } from "./staff-positions.js";
@@ -67,7 +77,7 @@ const MODELS_MISSING: ReadonlySet<string> = new Set([
 export function classifyFailure(
   cause: unknown,
   signal: AbortSignal | undefined
-): RecognizeError {
+): Exclude<RecognizeError, "tablature_only"> {
   if (signal?.aborted) {
     return isTimeoutAbort(signal) ? "timeout" : "cancelled";
   }
@@ -149,13 +159,46 @@ async function readPageText(
   return { texts, title };
 }
 
+/**
+ * Rows the guard paints white beyond a tab's outer lines, in line spacings:
+ * the fret numbers on them reach half a spacing out. Measured on the
+ * TablEdit Cripple Creek page, where it turns homr's four grand staves (the
+ * tab read as a bass staff) into the four treble staves.
+ */
+const TAB_MARGIN = 0.75;
+
+/** RapidOCR's recogniser, opened on the first five-line group that needs it, read text only. */
+function digitReader(
+  engine: RecognizeEngine,
+  signal: AbortSignal | undefined
+): ReadCrops {
+  let opened:
+    | Promise<{ characters: readonly string[]; session: ModelSession }>
+    | undefined;
+  return async (crops) => {
+    opened ??= engine
+      .open("ocrRecognize", undefined, signal)
+      .then((recognizer) => ({
+        characters: ctcCharacters(recognizer.metadata.get("character") ?? ""),
+        session: recognizer,
+      }));
+    const { characters, session } = await opened;
+    signal?.throwIfAborted();
+    const read = await recognizeCrops(engine.cv, session, characters, crops);
+    return read.map((text) => text.text);
+  };
+}
+
 async function readPage(
   page: ColorImage,
   engine: RecognizeEngine,
   log: string[],
   options: PipelineOptions
 ): Promise<
-  Omit<RecognizeResult & { ok: true }, "backend" | "durationMs" | "log">
+  Omit<
+    RecognizeResult & { ok: true },
+    "backend" | "durationMs" | "log" | "tablature"
+  >
 > {
   const { onProgress, signal } = options;
   const { cv } = engine;
@@ -220,7 +263,15 @@ async function readPage(
   };
 }
 
-/** Never throws: every failure is `ok: false` with its reason as the last log line. */
+const hasTabs = (
+  tablature: readonly TabSystem[]
+): tablature is readonly [TabSystem, ...TabSystem[]] => tablature.length > 0;
+
+/**
+ * Never throws: every failure is `ok: false` with its reason as the last log
+ * line. A page homr finds no staff on once its tabs are painted out is
+ * `tablature_only`, not `not_music`.
+ */
 export async function recognizePage(
   page: ColorImage,
   engine: RecognizeEngine,
@@ -228,16 +279,46 @@ export async function recognizePage(
 ): Promise<RecognizeResult> {
   const started = performance.now();
   const log: string[] = [];
+  const elapsed = () => Math.round(performance.now() - started);
+  let tablature: TabSystem[] = [];
   try {
-    const read = await readPage(page, engine, log, options);
+    options.signal?.throwIfAborted();
+    const tabs: DetectedTab[] = await detectTablature(
+      engine.cv,
+      page,
+      digitReader(engine, options.signal)
+    );
+    tablature = tabs.map((tab) => tab.system);
+    if (hasTabs(tablature)) {
+      log.push(
+        `Tab guard: ${tabs.length} tablature systems (${tablature.map((t) => t.lines).join(", ")} lines) painted out`
+      );
+    }
+    const read = await readPage(
+      tabs.length === 0 ? page : whitenTablature(page, tabs, TAB_MARGIN),
+      engine,
+      log,
+      options
+    );
     return {
       ...read,
       backend: engine.backend,
-      durationMs: Math.round(performance.now() - started),
+      durationMs: elapsed(),
       log: log.join("\n"),
+      tablature,
     };
   } catch (cause) {
     log.push(describeError(cause));
+    const error = classifyFailure(cause, options.signal);
+    if (error === "not_music" && hasTabs(tablature)) {
+      log.push("Every system on the page is tablature");
+      return tablatureOnlyResult(
+        engine.backend,
+        tablature,
+        log.join("\n"),
+        elapsed()
+      );
+    }
     return failedResult(
       engine.backend,
       classifyFailure(cause, options.signal),
@@ -277,6 +358,7 @@ export async function recognizeTexts(
       musicXml: "",
       ok: true,
       staves: [...staves],
+      tablature: [],
       texts,
     };
   } catch (cause) {
