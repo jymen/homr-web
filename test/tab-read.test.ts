@@ -13,12 +13,13 @@ import { type ColorImage, colorImageFromRgba } from "../src/image/plane.js";
 import { ctcCharacters } from "../src/ocr/ctc.js";
 import { recognizeCrops } from "../src/ocr/rapid-ocr.js";
 import { detectTablature, type ReadCrops } from "../src/tab/detect.js";
-import { midiOfPitch, pitchTab } from "../src/tab/pitch.js";
+import { pitchTab } from "../src/tab/pitch.js";
 import {
   readTablature,
   type TabNote,
   type TabTechnique,
 } from "../src/tab/read.js";
+import { midiOfPitch } from "../src/tab/tuning.js";
 import { CPU, describeWithModels, storeOn } from "./support/models.js";
 import { testOpenCv } from "./support/opencv.js";
 

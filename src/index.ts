@@ -23,14 +23,18 @@ export type {
   RecognizeSuccess,
   StaffBox,
   TabAnnotation,
+  TabCapo,
   TabEvent,
   TabNote,
   TabReading,
   TabSystem,
   TabTechnique,
+  TabTuning,
+  TuningSource,
 } from "./result.js";
 export { BACKENDS, PROGRESS_STAGES, RECOGNIZE_ERRORS } from "./result.js";
 export type { PitchedEvent, PitchedNote, Tuning } from "./tab/pitch.js";
-export { midiOfPitch, pitchTab } from "./tab/pitch.js";
+export { pitchTab, standardTuning, tuningOf } from "./tab/pitch.js";
 export { TAB_TECHNIQUES } from "./tab/read.js";
+export { midiOfPitch } from "./tab/tuning.js";
 export { HOMR_COMMIT, HOMR_VERSION } from "./version.js";

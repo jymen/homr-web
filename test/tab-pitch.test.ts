@@ -4,8 +4,9 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { midiOfPitch, pitchTab } from "../src/tab/pitch.js";
+import { pitchTab, standardTuning, tuningOf } from "../src/tab/pitch.js";
 import { eventsOf, readMark } from "../src/tab/read.js";
+import { midiOfPitch } from "../src/tab/tuning.js";
 
 describe("readMark", () => {
   it("reads frets, an O as a zero, and the letters stuck to a fret as its technique", () => {
@@ -156,5 +157,63 @@ describe("pitchTab", () => {
       RangeError
     );
     expect(pitchTab(reading, { capo: 0, strings: mandolin })).toEqual([]);
+  });
+});
+
+describe("pitchTab with the tuning read off the page", () => {
+  const events = [{ notes: [{ fret: 0, string: 5 }], x: 0.1 }] as const;
+  const sawmill = {
+    confidence: 1,
+    source: "text",
+    status: "read",
+    strings: ["D4", "C4", "G3", "D3", "G4"],
+    text: "gDGCD",
+  } as const;
+
+  it("takes the read tuning and capo when no tuning is passed", () => {
+    const reading = {
+      capo: { confidence: 1, fret: 2, text: "Capo 2" },
+      events,
+      lines: 5,
+      tuning: sawmill,
+    } as const;
+    expect(tuningOf(reading)).toEqual({
+      capo: 2,
+      strings: ["D4", "C4", "G3", "D3", "G4"].map(midiOfPitch),
+    });
+    expect(pitchTab(reading)[0]?.notes[0]?.midi).toBe(midiOfPitch("A4"));
+    expect(
+      pitchTab(reading, standardTuning(5))[0]?.notes[0]?.midi,
+      "a tuning passed wins"
+    ).toBe(midiOfPitch("G4"));
+  });
+
+  it("reads no capo as capo 0, and refuses to pitch without a tuning that fits", () => {
+    expect(
+      pitchTab({ events, lines: 5, tuning: sawmill })[0]?.notes[0]?.midi
+    ).toBe(midiOfPitch("G4"));
+    expect(() => pitchTab({ events, lines: 5 })).toThrow("standardTuning(5)");
+    expect(() =>
+      pitchTab({
+        events,
+        lines: 5,
+        tuning: { ...sawmill, status: "string_count", strings: ["D4"] },
+      })
+    ).toThrow(RangeError);
+    expect(
+      tuningOf({
+        tuning: { confidence: 1, status: "unknown_name", text: "Open Zeta" },
+      })
+    ).toBeUndefined();
+  });
+
+  it("offers the standard tuning per line count, never applied unasked", () => {
+    expect(standardTuning(4).strings).toEqual(
+      ["E5", "A4", "D4", "G3"].map(midiOfPitch)
+    );
+    expect(standardTuning(6)).toEqual({
+      capo: 0,
+      strings: ["E4", "B3", "G3", "D3", "A2", "E2"].map(midiOfPitch),
+    });
   });
 });

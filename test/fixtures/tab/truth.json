@@ -336,5 +336,126 @@
         }
       ]
     }
+  ],
+  "headers": [
+    {
+      "file": "header-banjo-en.png",
+      "width": 2480,
+      "height": 3508,
+      "lines": 5,
+      "texts": [{ "at": "subtitle", "text": "aDADE tuning, Capo 2" }],
+      "expect": { "capo": 2, "strings": ["E4", "D4", "A3", "D3", "A4"] }
+    },
+    {
+      "file": "header-banjo-fr.png",
+      "width": 2480,
+      "height": 3508,
+      "lines": 5,
+      "texts": [
+        { "at": "left", "text": "Accordage : Double C" },
+        { "at": "right", "text": "Capodastre en 3e case" }
+      ],
+      "expect": { "capo": 3, "strings": ["D4", "C4", "G3", "C3", "G4"] }
+    },
+    {
+      "file": "header-banjo-margin.png",
+      "width": 2480,
+      "height": 3508,
+      "lines": 5,
+      "texts": [
+        { "at": "margin", "text": "gDGBD" },
+        { "at": "right", "text": "Capo II" }
+      ],
+      "expect": { "capo": 2, "strings": ["D4", "B3", "G3", "D3", "G4"] }
+    },
+    {
+      "file": "header-guitar-en.png",
+      "width": 2480,
+      "height": 3508,
+      "lines": 6,
+      "texts": [
+        { "at": "left", "text": "Tuning: D A D G A D" },
+        { "at": "right", "text": "capo on 2nd fret" }
+      ],
+      "expect": { "capo": 2, "strings": ["D4", "A3", "G3", "D3", "A2", "D2"] }
+    },
+    {
+      "file": "header-guitar-fr.png",
+      "width": 2480,
+      "height": 3508,
+      "lines": 6,
+      "texts": [
+        { "at": "subtitle", "text": "Accord : Open G" },
+        { "at": "right", "text": "Capo : 5" }
+      ],
+      "expect": { "capo": 5, "strings": ["D4", "B3", "G3", "D3", "G2", "D2"] }
+    },
+    {
+      "file": "header-guitar-strings.png",
+      "width": 2480,
+      "height": 3508,
+      "lines": 6,
+      "texts": [
+        { "at": "left", "text": "(6) = D   (5) = G" },
+        { "at": "right", "text": "Capo 3rd" }
+      ],
+      "expect": { "capo": 3, "strings": ["E4", "B3", "G3", "D3", "G2", "D2"] }
+    },
+    {
+      "file": "header-guitar-below.png",
+      "width": 2480,
+      "height": 3508,
+      "lines": 6,
+      "texts": [{ "at": "below", "text": "Drop D" }],
+      "expect": {
+        "capo": null,
+        "strings": ["E4", "B3", "G3", "D3", "A2", "D2"]
+      }
+    },
+    {
+      "file": "header-guitar-labels.png",
+      "width": 2480,
+      "height": 3508,
+      "lines": 6,
+      "texts": [{ "at": "labels", "text": "e B G D A D" }],
+      "expect": {
+        "capo": null,
+        "strings": ["E4", "B3", "G3", "D3", "A2", "D2"]
+      }
+    },
+    {
+      "file": "header-mandolin.png",
+      "width": 2480,
+      "height": 3508,
+      "lines": 4,
+      "texts": [
+        { "at": "subtitle", "text": "Standard tuning (GDAE)" },
+        { "at": "right", "text": "capo 2 (sounds in A)" }
+      ],
+      "expect": { "capo": 2, "strings": ["E5", "A4", "D4", "G3"] }
+    },
+    {
+      "file": "header-banjo-mismatch.png",
+      "width": 2480,
+      "height": 3508,
+      "lines": 5,
+      "texts": [{ "at": "subtitle", "text": "DADGAD tuning" }],
+      "expect": {
+        "capo": null,
+        "status": "string_count",
+        "strings": ["D4", "A3", "G3", "D3", "A2", "D2"]
+      }
+    },
+    {
+      "file": "header-guitar-unknown.png",
+      "width": 2480,
+      "height": 3508,
+      "lines": 6,
+      "texts": [
+        { "at": "left", "text": "Open Zeta tuning" },
+        { "at": "right", "text": "Capodastre 2" }
+      ],
+      "expect": { "capo": 2, "status": "unknown_name", "strings": null }
+    }
   ]
 }

@@ -149,13 +149,33 @@ export function verticalPadding(
   });
 }
 
-/** DetPreProcess with limit_type "min": the short side up to 736, both sides to multiples of 32, then (x/255 - 0.5)/0.5 in CHW. */
-export function detectionInput(cv: OpenCv, image: ColorImage): Tensor {
+/**
+ * RapidOCR's Det.limit_type and Det.limit_side_len. The default, "min" 736,
+ * brings the short side up to 736, which on a wide strip of a page (2000 by
+ * 100) makes an image of 15 000 by 736 to detect on; "max" only brings the
+ * long side down.
+ */
+export interface DetectionLimit {
+  readonly side: number;
+  readonly type: "max" | "min";
+}
+
+export const DEFAULT_DETECTION_LIMIT: DetectionLimit = {
+  side: RAPID_OCR.detLimitSideLen,
+  type: "min",
+};
+
+/** DetPreProcess: the short side up to (or the long side down to) the limit, both sides to multiples of 32, then (x/255 - 0.5)/0.5 in CHW. */
+export function detectionInput(
+  cv: OpenCv,
+  image: ColorImage,
+  limit: DetectionLimit = DEFAULT_DETECTION_LIMIT
+): Tensor {
   const { height, width } = image;
-  const ratio =
-    Math.min(height, width) < RAPID_OCR.detLimitSideLen
-      ? RAPID_OCR.detLimitSideLen / (height < width ? height : width)
-      : 1;
+  const side =
+    limit.type === "min" ? Math.min(height, width) : Math.max(height, width);
+  const beyond = limit.type === "min" ? side < limit.side : side > limit.side;
+  const ratio = beyond ? limit.side / side : 1;
   const h = multipleOf32(height, ratio);
   const w = multipleOf32(width, ratio);
   const input = resized(cv, image, w, h);
@@ -458,21 +478,23 @@ export class RapidOcr {
   /** `minTextScore` is RapidOCR's Global.text_score: lines scoring below it are dropped. */
   async read(
     image: ColorImage,
-    minTextScore: number = RAPID_OCR.textScore
+    minTextScore: number = RAPID_OCR.textScore,
+    limit: DetectionLimit = DEFAULT_DETECTION_LIMIT
   ): Promise<OcrLine[]> {
-    return (await this.trace(image, minTextScore)).lines;
+    return (await this.trace(image, minTextScore, limit)).lines;
   }
 
   async trace(
     image: ColorImage,
-    minTextScore: number = RAPID_OCR.textScore
+    minTextScore: number = RAPID_OCR.textScore,
+    limit: DetectionLimit = DEFAULT_DETECTION_LIMIT
   ): Promise<{ readonly lines: OcrLine[]; readonly trace: OcrTrace }> {
     const cv = this.#cv;
     const preprocessed = preprocessImage(cv, image);
     const { image: padded, top } = verticalPadding(cv, preprocessed.image);
     const map = await runSingle(
       this.#sessions.detect,
-      detectionInput(cv, padded)
+      detectionInput(cv, padded, limit)
     );
     const boxes = withMatScope((scope) =>
       detectionBoxes(

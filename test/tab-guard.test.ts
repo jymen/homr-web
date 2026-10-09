@@ -224,7 +224,14 @@ describeWithModels("recognizePage behind the tab guard", () => {
           )
         );
         expect(progress).toEqual(
-          expect.arrayContaining(["tab 1/2", "tab 2/2"])
+          expect.arrayContaining(["tab 1/3", "tab 2/3", "tab 3/3"])
+        );
+        // the page prints no tuning or capo, so none is read and none is assumed
+        expect(
+          result.tablature.map(({ capo, tuning }) => ({ capo, tuning }))
+        ).toEqual([{}, {}]);
+        expect(result.log).toContain(
+          "Tab text: no tuning, no capo; no tuning, no capo"
         );
         expect(result.log).toContain("Every system on the page is tablature");
       } finally {

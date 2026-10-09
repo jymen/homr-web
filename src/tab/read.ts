@@ -25,6 +25,7 @@ import {
   readFret,
   type TabSystem,
 } from "./detect.js";
+import type { TabCapo, TabTuning } from "./tuning.js";
 
 /** One fret on one line: `string` 1 is the top line. */
 export interface TabNote {
@@ -62,10 +63,14 @@ export interface TabAnnotation {
  * A tab system with what is printed on it. `unread` counts the line-sitting
  * marks that read as neither a fret nor a technique: the "TAB" clef letters,
  * a time signature, a symbol the recogniser has no character for.
+ * `tuning` and `capo` are what the page's text says about this system
+ * (src/tab/text.ts), absent when it says nothing: never a default.
  */
 export interface TabReading extends TabSystem {
   readonly annotations: readonly TabAnnotation[];
+  readonly capo?: TabCapo;
   readonly events: readonly TabEvent[];
+  readonly tuning?: TabTuning;
   readonly unread: number;
 }
 

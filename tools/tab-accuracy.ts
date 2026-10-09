@@ -16,8 +16,16 @@
 //   [{ "png": "<file in .pages>", "key": "<name>", "tuning": ["D4", ...],
 //      "capo": 0, "staves": 0, "truth": { "system": 0, "events": "4/2 3/0 1/0+2/0" } }]
 //
-// usage: npx vite-node tools/tab-accuracy.ts [--no-homr]
-import { readFileSync } from "node:fs";
+// With --text it scores the tuning and capo read off the page text instead
+// (src/tab/text.ts), on the pages of test/fixtures/local/tablature/tab-text-truth.json
+// (git-ignored too), each found, correct, wrong or missing against the text the
+// page prints; an entry with a "pdf" is rasterised into .pages/ first:
+//   [{ "png": "<file in .pages>", "name": "<title>", "tuning": ["D4", ...] | null,
+//      "capo": 2 | null, "pdf": "<optional source PDF>" }]
+//
+// usage: npx vite-node tools/tab-accuracy.ts [--no-homr | --text]
+import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { PNG } from "pngjs";
@@ -27,11 +35,13 @@ import { startRuntime } from "../src/models/backend.js";
 import { memoryCache } from "../src/models/cache.js";
 import { ModelStore } from "../src/models/store.js";
 import { ctcCharacters } from "../src/ocr/ctc.js";
-import { recognizeCrops } from "../src/ocr/rapid-ocr.js";
+import { RapidOcr, recognizeCrops } from "../src/ocr/rapid-ocr.js";
 import { recognizePage } from "../src/pipeline/recognize.js";
 import { detectTablature, type ReadCrops } from "../src/tab/detect.js";
-import { midiOfPitch, pitchTab } from "../src/tab/pitch.js";
+import { pitchTab } from "../src/tab/pitch.js";
 import { readTablature, type TabReading } from "../src/tab/read.js";
+import { readTabText } from "../src/tab/text.js";
+import { midiOfPitch } from "../src/tab/tuning.js";
 
 const ROOT = join(
   import.meta.dirname,
@@ -51,9 +61,9 @@ interface Entry {
   readonly tuning: readonly string[];
 }
 
-const entries: readonly Entry[] = JSON.parse(
-  readFileSync(join(ROOT, "tab-truth.json"), "utf8")
-);
+const entries: readonly Entry[] = process.argv.includes("--text")
+  ? []
+  : JSON.parse(readFileSync(join(ROOT, "tab-truth.json"), "utf8"));
 const withHomr = !process.argv.includes("--no-homr");
 
 function pageOf(png: string): ColorImage {
@@ -245,6 +255,12 @@ console.log(
 const read: ReadCrops = async (crops) =>
   (await recognizeCrops(cv, session, characters, crops)).map((r) => r.text);
 
+if (process.argv.includes("--text")) {
+  await scoreText();
+  await store.close();
+  process.exit(0);
+}
+
 const readingsByKey = new Map<string, TabReading[]>();
 for (const entry of entries) {
   const page = pageOf(entry.png);
@@ -327,3 +343,121 @@ if (withHomr) {
   }
 }
 await store.close();
+
+interface TextEntry {
+  readonly capo: number | null;
+  readonly name: string;
+  readonly pdf?: string;
+  readonly png: string;
+  readonly tuning: readonly string[] | null;
+}
+
+type Verdict = "correct" | "missing" | "none" | "wrong";
+
+/** found and right, nothing printed and nothing found, printed and not found, or found and not what is printed. */
+function verdict<T>(
+  want: T | null,
+  got: T | undefined,
+  same: (a: T, b: T) => boolean
+): Verdict {
+  if (want === null) {
+    return got === undefined ? "none" : "wrong";
+  }
+  if (got === undefined) {
+    return "missing";
+  }
+  return same(want, got) ? "correct" : "wrong";
+}
+
+type TabTexts = Awaited<ReturnType<typeof readTabText>>;
+
+/** The systems' most common reading: the guard can take a staff for a tab, a false system with no text beside it. */
+function commonText(texts: TabTexts): TabTexts[number] {
+  const keyOf = (t: TabTexts[number]) =>
+    JSON.stringify([
+      t.tuning?.status === "read" ? t.tuning.strings : null,
+      t.capo?.fret ?? null,
+    ]);
+  const counts = new Map<string, number>();
+  for (const t of texts) {
+    counts.set(keyOf(t), (counts.get(keyOf(t)) ?? 0) + 1);
+  }
+  return (
+    [...texts].sort(
+      (a, b) => (counts.get(keyOf(b)) ?? 0) - (counts.get(keyOf(a)) ?? 0)
+    )[0] ?? {}
+  );
+}
+
+function describeTuning(tuning: TabTexts[number]["tuning"]): string {
+  if (tuning === undefined) {
+    return "-";
+  }
+  const strings =
+    tuning.status === "unknown_name" ? "" : ` ${tuning.strings.join(" ")}`;
+  return `${tuning.status}${strings} from ${JSON.stringify(tuning.text)} @${tuning.confidence.toFixed(2)}`;
+}
+
+function rasteriseSamples(textEntries: readonly TextEntry[]): void {
+  const tool = join(ROOT, ".pages", "rasterise-pdf");
+  for (const entry of textEntries) {
+    const png = join(ROOT, ".pages", entry.png);
+    if (entry.pdf !== undefined && !existsSync(png)) {
+      execFileSync(tool, [entry.pdf, png, "300", "1"]);
+    }
+  }
+}
+
+async function scoreText(): Promise<void> {
+  const textEntries: readonly TextEntry[] = JSON.parse(
+    readFileSync(join(ROOT, "tab-text-truth.json"), "utf8")
+  );
+  rasteriseSamples(textEntries);
+  const ocr = new RapidOcr(cv, {
+    classify: await store.open("ocrClassify"),
+    detect: await store.open("ocrDetect"),
+    recognize: session,
+  });
+  const totals = {
+    capo: new Map<Verdict, number>(),
+    tuning: new Map<Verdict, number>(),
+  };
+  for (const entry of textEntries) {
+    const page = pageOf(entry.png);
+    const started = performance.now();
+    const tabs = await detectTablature(cv, page, read);
+    const detected = performance.now();
+    const texts = await readTabText(
+      (image, minScore, limit) => ocr.read(image, minScore, limit),
+      page,
+      tabs
+    );
+    const done = performance.now();
+    const common = commonText(texts);
+    const strings =
+      common.tuning?.status === "read" ? common.tuning.strings : undefined;
+    const tuning = verdict(
+      entry.tuning,
+      strings,
+      (a, b) => a.join(" ") === b.join(" ")
+    );
+    const capo = verdict(entry.capo, common.capo?.fret, (a, b) => a === b);
+    totals.tuning.set(tuning, (totals.tuning.get(tuning) ?? 0) + 1);
+    totals.capo.set(capo, (totals.capo.get(capo) ?? 0) + 1);
+    const differ = texts.some((t) => t.tuning?.text !== common.tuning?.text);
+    console.log(
+      [
+        entry.name,
+        `tabs ${tabs.length}`,
+        `tuning ${tuning} (${describeTuning(common.tuning)})${differ ? " [systems differ]" : ""}`,
+        `capo ${capo} (${common.capo === undefined ? "-" : `${common.capo.fret} from ${JSON.stringify(common.capo.text)}`})`,
+        `detect ${Math.round(detected - started)} ms, text ${Math.round(done - detected)} ms`,
+      ].join(" | ")
+    );
+  }
+  for (const field of ["tuning", "capo"] as const) {
+    console.log(
+      `${field}: ${[...totals[field]].map(([v, n]) => `${v} ${n}`).join(", ")}`
+    );
+  }
+}

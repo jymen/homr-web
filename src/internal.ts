@@ -75,6 +75,8 @@ export * from "./segmentation/tiles.js";
 export * from "./tab/detect.js";
 export * from "./tab/pitch.js";
 export * from "./tab/read.js";
+export * from "./tab/text.js";
+export * from "./tab/tuning.js";
 export * from "./transformer/decoder.js";
 export * from "./transformer/duration.js";
 export * from "./transformer/encoder.js";

@@ -112,23 +112,54 @@ they are kept beside the events, not attached to them. The reader is built
 for born-digital tabs: on four vector PDFs it reads every event of a
 hand-transcribed system (83 of 83) and agrees with the staff printed above
 the tab on all 115 events of a mandolin page, while on a scanned page whose
-lines strike through the digits it reads almost nothing. It reads no tuning,
-capo or rhythm yet.
+lines strike through the digits it reads almost nothing. It reads no rhythm
+yet.
 
-Pitch needs the tuning and capo, which the page prints as text the library
-does not read yet. Given them, `pitchTab` adds open string, capo and fret:
+Pitch needs the tuning and capo, which most tab pages print as text: "aDADE
+tuning", "gDGBD" beside the TAB clef, "Key of A (Capo 2)", "Accord : Open G",
+"Capodastre en 3e case". The library reads that text around the tabs (the
+header above the first tab, each system's left margin, the line under the
+first system) and gives each system what it says:
 
 ```ts
-import { midiOfPitch, pitchTab } from "homr-web";
-
-const banjo = { capo: 2, strings: ["D4", "B3", "G3", "D3", "G4"].map(midiOfPitch) };
-const pitched = pitchTab(result.tablature[0], banjo); // [{ x, notes: [{ string, fret, midi }] }]
+const tab = result.tablature[0];
+tab.tuning; // { status: "read", strings: ["E4", "D4", "A3", "D3", "A4"], source: "text", text: "aDADE tuning", confidence }
+tab.capo; // { fret: 2, text: "Capo 2", confidence }
 ```
 
+`strings` are scientific pitch names, top line first, as many as the system
+has lines. Pages list strings low to high, which is bottom line first, and a
+banjo's lowercase first letter is its short fifth string, the bottom line;
+the octaves are those of the standard tuning for that many strings.
+`source` is `"text"` for printed letters and `"named"` for a name looked up
+per instrument ("Open G" is DGDGBD on a guitar, gDGBD on a banjo; "Sawmill",
+"Double C", "Drop D", "DADGAD", "Standard", in English and French). Two other
+statuses report without forcing: `string_count`, a tuning for another number
+of strings (DADGAD over a five-line tab), and `unknown_name`, a tuning word
+the registry does not know, kept as `text`. When the page prints nothing,
+`tuning` and `capo` are absent: the library never assumes a tuning. On 23
+local pages it read every tuning and capo printed (10 tunings, 5 capos) and
+invented none on the 13 pages that print none; it costs 1.3 to 5 seconds a
+page under Node, on pages with tabs only.
+
+`pitchTab` adds open string, capo and fret, with the tuning and capo read off
+the page, or with yours:
+
+```ts
+import { midiOfPitch, pitchTab, standardTuning } from "homr-web";
+
+const pitched = pitchTab(tab); // [{ x, notes: [{ string, fret, midi }] }], no printed capo is capo 0
+const assumed = pitchTab(tab, standardTuning(tab.lines)); // when the page names no tuning and the user agrees
+const banjo = { capo: 2, strings: ["D4", "B3", "G3", "D3", "G4"].map(midiOfPitch) };
+const corrected = pitchTab(tab, banjo);
+```
+
+A tuning passed in wins over the page's, which is how a correction applies.
 `strings` are the open strings top line first, so a five-string banjo's short
 fifth string is the last one, and the capo raises it like the others.
 `pitchTab` throws a `RangeError` when the tuning's string count is not the
-system's line count.
+system's line count, or when no tuning is passed and none that fits was read.
+`tuningOf(tab)` gives the read tuning in `pitchTab`'s terms, or undefined.
 
 To read the strips alone above staves you already have, for example the
 server's:
@@ -139,14 +170,18 @@ console.log(strips.texts); // musicXml is "", staves are the ones given
 ```
 
 Progress arrives in stages: `models` (bytes of the six models, on the first
-page only), `tab` (one per tab system, on a page that has tabs), `segment` (tiles), `detect`, `dewarp` and `staff` (one each per
-staff), `ocr` (one per staff, and one for the title), and `xml`. On a first
-page `models` appears three times, before `segment` for the segmentation
-model, after `detect` for the transformer and before `ocr` for the three OCR
-models, and a fourth time first of all when the tab guard or the tab reader
-needs the OCR recogniser; a page that is not music never downloads the
-transformer, and `{ ocr: false }` never downloads the OCR models, except the
-recogniser on a page with tablature or a five-line tablature candidate. On an Apple M-series laptop with WebGPU a page takes 7 to
+page only), `tab` (one per tab system and one for its tuning text, on a page
+that has tabs), `segment` (tiles), `detect`, `dewarp` and `staff` (one each
+per staff), `ocr` (one per staff, and one for the title), and `xml`. On a
+first page `models` appears three times, before `segment` for the
+segmentation model, after `detect` for the transformer and before `ocr` for
+the three OCR models. A page with tablature adds it twice before those: for
+the OCR recogniser, which the tab guard and the fret reader use, and for the
+OCR detector and classifier, which read the tuning and capo text. A page
+that is not music never downloads the transformer, and `{ ocr: false }`
+never downloads the OCR models, except the recogniser on a page with
+tablature or a five-line tablature candidate and the detector and classifier
+on a page with tablature. On an Apple M-series laptop with WebGPU a page takes 7 to
 9 seconds once the models are cached, of which the OCR is about 3 seconds
 (about 5 on WebAssembly threads); `readTextStrips` alone takes about 2.5
 seconds. Under Node on one WebAssembly thread a page takes about 55 seconds,

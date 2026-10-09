@@ -37,6 +37,7 @@ import {
   whitenTablature,
 } from "../tab/detect.js";
 import { readTablature, type TabReading } from "../tab/read.js";
+import { readTabText, type TabText } from "../tab/text.js";
 import { detectStaffsInImage } from "./detect.js";
 import { parseStaffs } from "./parse-staffs.js";
 import { staffBoxes, staffPositions } from "./staff-positions.js";
@@ -263,6 +264,41 @@ async function readPage(
   };
 }
 
+/**
+ * The tuning and capo printed around the tabs, or nothing for every system
+ * and a log line when the OCR fails: the frets stand without them, as the
+ * chord strips fail alone. A cancel still cancels.
+ */
+async function readTabTextOrNothing(
+  engine: RecognizeEngine,
+  page: ColorImage,
+  tabs: readonly DetectedTab[],
+  log: string[],
+  { signal }: PipelineOptions
+): Promise<readonly TabText[]> {
+  try {
+    const ocr = await openOcr(engine, signal);
+    signal?.throwIfAborted();
+    return await readTabText(
+      (image, minScore, limit) => ocr.read(image, minScore, limit),
+      page,
+      tabs
+    );
+  } catch (cause) {
+    signal?.throwIfAborted();
+    log.push(`tab text failed: ${describeError(cause)}`);
+    return tabs.map(() => ({}));
+  }
+}
+
+const describeTabText = ({ capo, tuning }: TabReading): string =>
+  [
+    tuning === undefined
+      ? "no tuning"
+      : `tuning ${tuning.status === "unknown_name" ? "unknown" : `${tuning.status} ${tuning.strings.join(" ")}`} from ${JSON.stringify(tuning.text)}`,
+    capo === undefined ? "no capo" : `capo ${capo.fret}`,
+  ].join(", ");
+
 const hasTabs = (
   tablature: readonly TabReading[]
 ): tablature is readonly [TabReading, ...TabReading[]] => tablature.length > 0;
@@ -285,17 +321,23 @@ export async function recognizePage(
     options.signal?.throwIfAborted();
     const read = digitReader(engine, options.signal);
     const tabs: DetectedTab[] = await detectTablature(engine.cv, page, read);
-    tablature = await readTablature(
-      engine.cv,
-      page,
-      tabs,
-      read,
-      (done, total) => options.onProgress?.({ done, stage: "tab", total })
-    );
+    const reportTab = (done: number) =>
+      options.onProgress?.({ done, stage: "tab", total: tabs.length + 1 });
+    tablature = await readTablature(engine.cv, page, tabs, read, reportTab);
     if (hasTabs(tablature)) {
+      const texts = await readTabTextOrNothing(
+        engine,
+        page,
+        tabs,
+        log,
+        options
+      );
+      reportTab(tabs.length + 1);
+      tablature = tablature.map((system, k) => ({ ...system, ...texts[k] }));
       log.push(
         `Tab guard: ${tabs.length} tablature systems (${tablature.map((t) => t.lines).join(", ")} lines) painted out`,
-        `Tab reader: ${tablature.map((t) => t.events.length).join(", ")} events`
+        `Tab reader: ${tablature.map((t) => t.events.length).join(", ")} events`,
+        `Tab text: ${tablature.map(describeTabText).join("; ")}`
       );
     }
     const reading = await readPage(

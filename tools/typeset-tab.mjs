@@ -1,9 +1,11 @@
 // Typesets the line-tablature fixtures in test/fixtures/tab/ and writes their
-// truth: three A4 pages at 300 dpi (2480 x 3508), one per instrument, each
-// built as an SVG from the column specs in PAGES below, rasterised by
-// rsvg-convert and re-encoded as 8-bit grayscale PNG. truth.json holds every
+// truth: A4 pages at 300 dpi (2480 x 3508), each built as an SVG, rasterised
+// by rsvg-convert and re-encoded as 8-bit grayscale PNG. Three fret pages,
+// one per instrument, from the column specs in PAGES: truth.json holds every
 // event's page-pixel x and its (string, fret) notes, every technique letter
-// and the count of slur arcs, all read from the layout that drew them.
+// and the count of slur arcs, all read from the layout that drew them. Eleven
+// header pages from HEADER_PAGES, one short system each with the tuning and
+// capo text a page prints: truth.json's `headers` holds what that text says.
 //
 // Glyph placement is measured, not assumed: each label is first rasterised
 // alone and its ink box read back, so a number is placed with its ink centred
@@ -55,6 +57,7 @@ const PNG_SUFFIX = /\.png$/;
 const TRUTH_KEYS = [
   "generator",
   "pages",
+  "headers",
   "file",
   "width",
   "height",
@@ -72,6 +75,12 @@ const TRUTH_KEYS = [
   "annotations",
   "technique",
   "arcs",
+  "texts",
+  "at",
+  "text",
+  "expect",
+  "status",
+  "strings",
 ];
 const LINE_WIDTH = 80;
 
@@ -151,6 +160,203 @@ const PAGES = [
     tuning: ["E5", "A4", "D4", "G3"],
   },
 ];
+
+const HEADER_HEIGHT = HEIGHT;
+const HEADER_TOP = 440;
+const BANJO_COLUMNS = "1:0 2:1 3:2 4:3 5:0 1:2 2:3 3:0 4:2 5:0 1:0+2:1";
+const GUITAR_COLUMNS = "6:0 5:2 4:2 3:1 2:0 1:0 5:3+4:2 6:3 1:3 2:1";
+const MANDOLIN_COLUMNS = "4:0 4:2 3:0 3:2 2:0 2:2 1:0 1:2 2:0+3:2";
+
+/**
+ * Pages for the tuning and capo text (src/tab/text.ts): one short system
+ * each, with the text where tab software prints it, a centred subtitle under
+ * the title, a line at the right or left above the system, a label turned a
+ * quarter in the left margin, one string name per line in the margin, or a
+ * line under the system. `expect` is what the page says, top line first: a
+ * tuning that fits, one for another string count, an unknown name, or none.
+ */
+const HEADER_PAGES = [
+  {
+    columns: BANJO_COLUMNS,
+    expect: { capo: 2, strings: ["E4", "D4", "A3", "D3", "A4"] },
+    file: "header-banjo-en.png",
+    lines: 5,
+    texts: [
+      {
+        at: "subtitle",
+        family: SERIF,
+        text: "aDADE tuning, Capo 2",
+        weight: "bold",
+      },
+    ],
+  },
+  {
+    columns: BANJO_COLUMNS,
+    expect: { capo: 3, strings: ["D4", "C4", "G3", "C3", "G4"] },
+    file: "header-banjo-fr.png",
+    lines: 5,
+    texts: [
+      { at: "left", family: SANS, text: "Accordage : Double C" },
+      { at: "right", family: SANS, text: "Capodastre en 3e case" },
+    ],
+  },
+  {
+    columns: BANJO_COLUMNS,
+    expect: { capo: 2, strings: ["D4", "B3", "G3", "D3", "G4"] },
+    file: "header-banjo-margin.png",
+    lines: 5,
+    texts: [
+      { at: "margin", family: SERIF, text: "gDGBD" },
+      { at: "right", family: SERIF, text: "Capo II" },
+    ],
+  },
+  {
+    columns: GUITAR_COLUMNS,
+    expect: { capo: 2, strings: ["D4", "A3", "G3", "D3", "A2", "D2"] },
+    file: "header-guitar-en.png",
+    lines: 6,
+    texts: [
+      { at: "left", family: SERIF, text: "Tuning: D A D G A D" },
+      { at: "right", family: SERIF, text: "capo on 2nd fret" },
+    ],
+  },
+  {
+    columns: GUITAR_COLUMNS,
+    expect: { capo: 5, strings: ["D4", "B3", "G3", "D3", "G2", "D2"] },
+    file: "header-guitar-fr.png",
+    lines: 6,
+    texts: [
+      { at: "subtitle", family: SERIF, text: "Accord : Open G" },
+      { at: "right", family: SERIF, text: "Capo : 5" },
+    ],
+  },
+  {
+    columns: GUITAR_COLUMNS,
+    expect: { capo: 3, strings: ["E4", "B3", "G3", "D3", "G2", "D2"] },
+    file: "header-guitar-strings.png",
+    lines: 6,
+    texts: [
+      { at: "left", family: SANS, text: "(6) = D   (5) = G" },
+      { at: "right", family: SANS, text: "Capo 3rd" },
+    ],
+  },
+  {
+    columns: GUITAR_COLUMNS,
+    expect: { capo: null, strings: ["E4", "B3", "G3", "D3", "A2", "D2"] },
+    file: "header-guitar-below.png",
+    lines: 6,
+    texts: [{ at: "below", family: SANS, text: "Drop D" }],
+  },
+  {
+    columns: GUITAR_COLUMNS,
+    expect: { capo: null, strings: ["E4", "B3", "G3", "D3", "A2", "D2"] },
+    file: "header-guitar-labels.png",
+    lines: 6,
+    texts: [{ at: "labels", family: SANS, text: "e B G D A D" }],
+  },
+  {
+    columns: MANDOLIN_COLUMNS,
+    expect: { capo: 2, strings: ["E5", "A4", "D4", "G3"] },
+    file: "header-mandolin.png",
+    lines: 4,
+    texts: [
+      { at: "subtitle", family: SANS, text: "Standard tuning (GDAE)" },
+      { at: "right", family: SANS, text: "capo 2 (sounds in A)" },
+    ],
+  },
+  {
+    columns: BANJO_COLUMNS,
+    expect: {
+      capo: null,
+      status: "string_count",
+      strings: ["D4", "A3", "G3", "D3", "A2", "D2"],
+    },
+    file: "header-banjo-mismatch.png",
+    lines: 5,
+    texts: [{ at: "subtitle", family: SERIF, text: "DADGAD tuning" }],
+  },
+  {
+    columns: GUITAR_COLUMNS,
+    expect: { capo: 2, status: "unknown_name", strings: null },
+    file: "header-guitar-unknown.png",
+    lines: 6,
+    texts: [
+      { at: "left", family: SERIF, text: "Open Zeta tuning" },
+      { at: "right", family: SERIF, text: "Capodastre 2" },
+    ],
+  },
+];
+
+/** Where each header text goes, in page pixels, and how it is anchored. */
+function headerText(page, label) {
+  const s = page.spacing;
+  const top = HEADER_TOP;
+  const bottom = top + (page.lines - 1) * s;
+  const place = {
+    below: { anchor: "start", size: 40, x: SYSTEM_X0, y: bottom + 2.4 * s },
+    left: { anchor: "start", size: 38, x: SYSTEM_X0, y: top - 2.2 * s },
+    margin: {
+      anchor: "middle",
+      rotate: true,
+      size: 40,
+      x: SYSTEM_X0 - 0.9 * s,
+      y: (top + bottom) / 2,
+    },
+    right: { anchor: "end", size: 38, x: SYSTEM_X1, y: top - 2.2 * s },
+    subtitle: { anchor: "middle", size: 48, x: WIDTH / 2, y: 280 },
+  }[label.at];
+  if (label.at === "labels") {
+    return label.text
+      .split(" ")
+      .map(
+        (name, k) =>
+          `<text x="${SYSTEM_X0 - 0.5 * s}" y="${top + k * s + 0.35 * s}" font-family="${label.family}" font-size="${Math.round(0.9 * s)}" text-anchor="end">${escapeXml(name)}</text>`
+      )
+      .join("");
+  }
+  const rotate = place.rotate
+    ? ` transform="rotate(-90 ${place.x} ${place.y})"`
+    : "";
+  return `<text x="${place.x}" y="${place.y}" font-family="${label.family}" font-size="${place.size}" font-weight="${label.weight ?? "normal"}" text-anchor="${place.anchor}"${rotate}>${escapeXml(label.text)}</text>`;
+}
+
+const HEADER_STYLE = {
+  4: { font: SANS, spacing: 36 },
+  5: { font: SANS, spacing: 42 },
+  6: { font: SERIF, spacing: 31 },
+};
+
+function typesetHeaderPage(spec, work, env) {
+  const page = {
+    clef: spec.lines !== 4,
+    file: spec.file,
+    lines: spec.lines,
+    ...HEADER_STYLE[spec.lines],
+  };
+  const glyphs = glyphsFor(page, work, env);
+  const system = layoutSystem(
+    page,
+    { columns: spec.columns, knockout: true },
+    HEADER_TOP,
+    glyphs
+  );
+  const title = `<text x="${WIDTH / 2}" y="190" font-family="${SERIF}" font-size="80" text-anchor="middle">${escapeXml(`Fixture tune, ${spec.lines} lines`)}</text>`;
+  const texts = spec.texts.map((label) => headerText(page, label)).join("\n");
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEADER_HEIGHT}"><rect width="100%" height="100%" fill="#fff"/>\n${title}\n${texts}\n${system.svg}\n</svg>`;
+  const png = toGrayPng(
+    rasterise(svg, work, env, spec.file.replace(PNG_SUFFIX, ""))
+  );
+  writeFileSync(join(outDir, spec.file), png);
+  console.log(`${spec.file}: ${png.length} bytes`);
+  return {
+    expect: spec.expect,
+    file: spec.file,
+    height: HEADER_HEIGHT,
+    lines: spec.lines,
+    texts: spec.texts.map(({ at, text }) => ({ at, text })),
+    width: WIDTH,
+  };
+}
 
 function parseColumns(text) {
   return text
@@ -608,9 +814,12 @@ try {
     });
     console.log(`${page.file}: ${png.length} bytes, ${systems.length} systems`);
   }
+  const headers = HEADER_PAGES.map((spec) =>
+    typesetHeaderPage(spec, scratch, env)
+  );
   writeFileSync(
     join(outDir, "truth.json"),
-    `${toJson({ generator: "tools/typeset-tab.mjs", pages: truthPages })}\n`
+    `${toJson({ generator: "tools/typeset-tab.mjs", headers, pages: truthPages })}\n`
   );
 } finally {
   rmSync(scratch, { force: true, recursive: true });

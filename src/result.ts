@@ -16,6 +16,7 @@ export type {
   TabReading,
   TabTechnique,
 } from "./tab/read.js";
+export type { TabCapo, TabTuning, TuningSource } from "./tab/tuning.js";
 
 export const BACKENDS = ["webgpu", "wasm-threads", "wasm"] as const;
 /** Chosen once per Worker by startRuntime and frozen before the first session. */
@@ -58,11 +59,12 @@ export interface PageText {
  * `models` counts bytes of the six models, cached ones as done, on the first
  * page a recognizer reads. The segmentation model opens before `segment`, the
  * transformer's two after `detect` and the three OCR models before `ocr`, so
- * `models` appears three times on a first page (four when the tab guard opens
- * the OCR recogniser first, on a page with tablature),
- * and a page that is not music, or read with `ocr: false`, stops short of the
- * total. `tab` counts the tab systems read, and appears only on a page that
- * has one. `segment` counts segnet
+ * `models` appears three times on a first page, and a page that is not
+ * music, or read with `ocr: false`, stops short of the total. A page with
+ * tablature adds two openings before the rest: the OCR recogniser for the
+ * guard and the frets, then the OCR detector and classifier for the tuning
+ * and capo text. `tab` counts the tab systems read plus one for that text,
+ * and appears only on a page that has a tab. `segment` counts segnet
  * batches, `dewarp` and `staff` count staffs, `ocr` counts the chord strips
  * and the title band, `detect` and `xml` go from 0/1 to 1/1.
  */
