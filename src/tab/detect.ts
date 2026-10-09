@@ -58,15 +58,15 @@ export interface DetectedTab {
   readonly system: TabSystem;
 }
 
-interface Box {
+export interface Box {
   readonly h: number;
   readonly w: number;
   readonly x: number;
   readonly y: number;
 }
 
-/** A line-sitting mark of a five-line group, `line` 0-based from the top. */
-interface Mark extends Box {
+/** A line-sitting mark, in page pixels, `line` 0-based from the top. */
+export interface Mark extends Box {
   readonly line: number;
 }
 
@@ -125,18 +125,32 @@ const TAB = {
   thicknessShare: 1 / 400,
 } as const;
 
-/** A fret number, possibly with a technique letter stuck to it ("S0", "7h"); "O" reads as 0. */
-const FRET = /^[A-Za-z~/\\(]*?(\d{1,2})[A-Za-z~/\\)]*$/;
+/** A fret number, possibly with technique letters stuck to it ("S0", "7h"); "O" reads as 0. */
+const FRET = /^([A-Za-z~/\\(]*?)(\d{1,2})([A-Za-z~/\\)]*)$/;
 
-export function isFretText(text: string): boolean {
-  const cleaned = text.trim().replace(/[Oo](?=\d|$)/g, "0");
-  return (
-    FRET.test(cleaned) && Number(cleaned.replace(FRET, "$1")) <= TAB.maxFret
-  );
+/** The fret a recogniser read names, and the letters stuck to it, or undefined when the text is no fret. */
+export function readFret(
+  text: string
+): { readonly fret: number; readonly letters: string } | undefined {
+  const match = text
+    .trim()
+    .replace(/[Oo](?=\d|$)/g, "0")
+    .match(FRET);
+  if (!match) {
+    return;
+  }
+  const [, before, digits, after] = match;
+  const fret = Number(digits);
+  return fret > TAB.maxFret
+    ? undefined
+    : { fret, letters: `${before ?? ""}${after ?? ""}` };
 }
 
+export const isFretText = (text: string): boolean =>
+  readFret(text) !== undefined;
+
 /** 1 where the page is ink, Otsu-thresholded on cv2's gray, so a gray scan and a clean PDF share one rule. */
-function inkOf(cv: OpenCv, scope: MatScope, page: ColorImage): Mat {
+export function inkOf(cv: OpenCv, scope: MatScope, page: ColorImage): Mat {
   const gray = scope.keep(new cv.Mat());
   cv.cvtColor(planeToMat(cv, scope, page), gray, cv.COLOR_BGR2GRAY);
   const ink = scope.keep(new cv.Mat());
@@ -295,9 +309,12 @@ function bandOf(group: LineGroup, height: number, margin: number) {
 /**
  * The group's band with its lines erased: a line pixel goes when nothing
  * touches the line there from above or below, so a digit the line crosses
- * keeps its middle.
+ * keeps its middle, and when it belongs to the line itself: a horizontal run
+ * at least a line spacing long, or a shorter one with a free end (a stub of
+ * line left beside a knock-out). The bar of an H standing on the line inside
+ * a knock-out is short and held by a stem at both ends, so it stays.
  */
-function bandWithoutLines(
+export function bandWithoutLines(
   ink: Uint8Array,
   width: number,
   height: number,
@@ -314,10 +331,18 @@ function bandWithoutLines(
   for (const line of group.lines) {
     const a = line.y0 - 1 - top;
     const b = line.y1 + 1 - top;
+    const free = new Uint8Array(cols);
     for (let x = 0; x < cols; x += 1) {
       const above = a - 1 >= 0 && data[(a - 1) * cols + x] === 1;
       const below = b + 1 < rows && data[(b + 1) * cols + x] === 1;
-      if (!(above || below)) {
+      free[x] = above || below ? 0 : 1;
+    }
+    const ruled = ruledColumns(data, cols, line.y0 - top, line.y1 - top, {
+      free,
+      minRun: group.spacing,
+    });
+    for (let x = 0; x < cols; x += 1) {
+      if (ruled[x] === 1 && free[x] === 1) {
         for (let y = Math.max(0, a); y <= Math.min(rows - 1, b); y += 1) {
           data[y * cols + x] = 0;
         }
@@ -325,6 +350,34 @@ function bandWithoutLines(
     }
   }
   return { data, rows, top };
+}
+
+/** 1 for the columns of the line's rows that lie in a run belonging to the line (see bandWithoutLines). */
+function ruledColumns(
+  data: Uint8Array,
+  cols: number,
+  y0: number,
+  y1: number,
+  { free, minRun }: { readonly free: Uint8Array; readonly minRun: number }
+): Uint8Array {
+  const ruled = new Uint8Array(cols);
+  for (let y = y0; y <= y1; y += 1) {
+    let run = 0;
+    for (let x = 0; x <= cols; x += 1) {
+      if (x < cols && data[y * cols + x] === 1) {
+        run += 1;
+        continue;
+      }
+      if (
+        run >= minRun ||
+        (run > 0 && (free[x - run] === 1 || free[x - 1] === 1))
+      ) {
+        ruled.fill(1, x - run, x);
+      }
+      run = 0;
+    }
+  }
+  return ruled;
 }
 
 /** Connected components' boxes of a 0/1 band, 4-connected as the prototype's flood fill. */
@@ -362,14 +415,18 @@ function componentBoxes(
   });
 }
 
-/** Digit-sized components on a line, touching ones merged ("12"), short arcs dropped, in page pixels. */
-function marksOf(
+/**
+ * Digit-sized components on a line, touching ones merged ("12"), in page
+ * pixels, ordered by line then x. `short` holds the marks under 0.75 of the
+ * median height: arcs cut by a stem, and x-height letters ("x", "o").
+ */
+export function marksOf(
   cv: OpenCv,
   ink: Uint8Array,
   width: number,
   height: number,
   group: LineGroup
-): Mark[] {
+): { readonly marks: Mark[]; readonly short: Mark[] } {
   const s = group.spacing;
   const band = bandWithoutLines(ink, width, height, group);
   const cols = group.x1 - group.x0 + 1;
@@ -422,11 +479,15 @@ function marksOf(
   }
   const heights = merged.map((m) => m.h).sort((a, b) => a - b);
   const median = heights[Math.floor(heights.length / 2)] ?? 0;
-  return merged.filter((m) => m.h >= TAB.minMedianHeight * median);
+  const tall = (m: Mark) => m.h >= TAB.minMedianHeight * median;
+  return {
+    marks: merged.filter(tall),
+    short: merged.filter((m) => !tall(m)),
+  };
 }
 
 /** The mark's own ink on white, padded, so the recogniser sees a bare number. */
-function cropOf(
+export function cropOf(
   page: ColorImage,
   ink: Uint8Array,
   mark: Mark,
@@ -528,7 +589,7 @@ export async function detectTablature(
         if (group.lines.length !== 5) {
           return { evidence: "tab", group };
         }
-        const marks = marksOf(cv, ink, page.width, page.height, group);
+        const { marks } = marksOf(cv, ink, page.width, page.height, group);
         return {
           evidence:
             marks.length < TAB.minDigits

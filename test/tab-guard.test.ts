@@ -19,6 +19,7 @@ import { CPU, describeWithModels, storeOn } from "./support/models.js";
 import { testOpenCv } from "./support/opencv.js";
 import {
   type Drawn,
+  drawnFrets,
   drawPage,
   PAGE_HEIGHT,
   PAGE_WIDTH,
@@ -184,6 +185,7 @@ describeWithModels("recognizePage behind the tab guard", () => {
       const cv = await testOpenCv();
       const store = await storeOn(CPU);
       try {
+        const progress: string[] = [];
         const result = await recognizePage(
           drawPage(cv, [
             { kind: "tab", lines: 5, spacing: TAB, top: 300 },
@@ -195,7 +197,11 @@ describeWithModels("recognizePage behind the tab guard", () => {
             open: (role, batch) =>
               store.open(role, batch === undefined ? {} : { batch }),
           },
-          { ocr: false }
+          {
+            ocr: false,
+            onProgress: ({ done, stage, total }) =>
+              progress.push(`${stage} ${done}/${total}`),
+          }
         );
         expect(result).toMatchObject({
           error: "tablature_only",
@@ -205,6 +211,21 @@ describeWithModels("recognizePage behind the tab guard", () => {
           texts: [],
         });
         expect(result.tablature.map((t) => t.lines)).toEqual([5, 6]);
+        // The first seven columns are single digits. Hershey's two digits stand
+        // apart at 150 dpi and read as two frets; test/tab-read.test.ts covers
+        // two-digit frets on typeset pages.
+        expect(
+          result.tablature.map((t) => t.events.slice(0, 7).map((e) => e.notes))
+        ).toEqual(
+          [5, 6].map((lines) =>
+            drawnFrets(lines)
+              .slice(0, 7)
+              .map((n) => [n])
+          )
+        );
+        expect(progress).toEqual(
+          expect.arrayContaining(["tab 1/2", "tab 2/2"])
+        );
         expect(result.log).toContain("Every system on the page is tablature");
       } finally {
         await store.close();

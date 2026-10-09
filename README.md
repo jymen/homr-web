@@ -35,7 +35,7 @@ if (result.ok) {
   render(result.musicXml); // MusicXML 4.0, one part per voice, homr's title in work-title
   console.log(result.staves); // [{ index, cx, cy, w, h }], page-normalised, top to bottom
   console.log(result.texts); // [{ staff, text, score, x0, y0, x1, y1 }], the chords above each staff
-  console.log(result.tablature); // [{ index, lines, cx, cy, w, h }], tab systems kept out of the reading
+  console.log(result.tablature); // [{ index, lines, cx, cy, w, h, events, annotations, unread }], tab systems and their frets
 } else {
   console.warn(result.error, result.log);
 }
@@ -51,7 +51,7 @@ with `ok: false` and one of these codes in `error`:
 |---|---|
 | `bad_input` | the image could not be decoded |
 | `not_music` | homr found no staff or no notehead on the page |
-| `tablature_only` | every system on the page is line tablature, which homr cannot read; `tablature` lists them |
+| `tablature_only` | every system on the page is line tablature, which homr cannot read; `tablature` lists them with their frets |
 | `engine_missing` | a model could not be downloaded or did not match its hash |
 | `engine_failed` | anything else went wrong inside the engine |
 | `busy` | this recognizer is still reading another page |
@@ -80,19 +80,55 @@ out as a piano grand staff whose bass staff is the tab. So before homr
 reads the page, a guard finds the tab systems and paints them white:
 `staves` and the MusicXML then hold the standard staves alone, and
 `tablature` lists the tab systems (`lines`, 4 to 6, and the extent of the
-lines, page-normalised like `staves`, `index` from the top). A page with
-nothing but tabs answers `tablature_only` with its systems, rather than
-notes that are not there.
+lines, page-normalised like `staves`, `index` from the top), each with the
+frets read on it. A page with nothing but tabs answers `tablature_only` with
+its systems and their frets, rather than notes that are not there.
 
 A system is a run of four to six evenly spaced horizontal lines. Four or six
 lines is a tab; five lines is a tab when the marks sitting on its lines read
 as numbers, which RapidOCR's recogniser decides from a sample of at most
-twelve of them. A page with no five-line group carrying such marks never
-loads the recogniser. Nothing is read from the tab yet: no frets, strings,
-tuning or rhythm. Detection is measured on 15 pages at 300 dpi (banjo,
-mandolin and guitar PDFs, one of them a scan), 56 tab systems out of 56; it
-finds nothing on a low-resolution phone photograph (lines 5 px apart), where
-homr reads the tab as before.
+twelve of them. A page with no tab, and no five-line group carrying such
+marks, never loads the recogniser. Detection is measured on 15 pages at 300
+dpi (banjo, mandolin and guitar PDFs, one of them a scan), 56 tab systems out
+of 56; it finds nothing on a low-resolution phone photograph (lines 5 px
+apart), where homr reads the tab as before.
+
+Each tab system then has its frets read: every digit-sized mark sitting on a
+line is read by the same recogniser, on its own.
+
+```ts
+for (const tab of result.tablature) {
+  tab.lines; // 4, 5 or 6
+  tab.events; // [{ x, notes: [{ string, fret }, ...] }], left to right
+  tab.annotations; // [{ x, string, technique }]: "Sl", "Po", "H", "R", "p", "h", "x", "Harm."
+  tab.unread; // marks on the lines that read as neither: the TAB clef, a time signature
+}
+```
+
+`string` 1 is the top line. An event is the frets struck together, one per
+string, ordered by string: a single note is a chord of one. `x` is
+page-normalised like the systems. Technique letters never change a pitch;
+they are kept beside the events, not attached to them. The reader is built
+for born-digital tabs: on four vector PDFs it reads every event of a
+hand-transcribed system (83 of 83) and agrees with the staff printed above
+the tab on all 115 events of a mandolin page, while on a scanned page whose
+lines strike through the digits it reads almost nothing. It reads no tuning,
+capo or rhythm yet.
+
+Pitch needs the tuning and capo, which the page prints as text the library
+does not read yet. Given them, `pitchTab` adds open string, capo and fret:
+
+```ts
+import { midiOfPitch, pitchTab } from "homr-web";
+
+const banjo = { capo: 2, strings: ["D4", "B3", "G3", "D3", "G4"].map(midiOfPitch) };
+const pitched = pitchTab(result.tablature[0], banjo); // [{ x, notes: [{ string, fret, midi }] }]
+```
+
+`strings` are the open strings top line first, so a five-string banjo's short
+fifth string is the last one, and the capo raises it like the others.
+`pitchTab` throws a `RangeError` when the tuning's string count is not the
+system's line count.
 
 To read the strips alone above staves you already have, for example the
 server's:
@@ -103,14 +139,14 @@ console.log(strips.texts); // musicXml is "", staves are the ones given
 ```
 
 Progress arrives in stages: `models` (bytes of the six models, on the first
-page only), `segment` (tiles), `detect`, `dewarp` and `staff` (one each per
+page only), `tab` (one per tab system, on a page that has tabs), `segment` (tiles), `detect`, `dewarp` and `staff` (one each per
 staff), `ocr` (one per staff, and one for the title), and `xml`. On a first
 page `models` appears three times, before `segment` for the segmentation
 model, after `detect` for the transformer and before `ocr` for the three OCR
-models, and a fourth time first of all when the tab guard needs the OCR
-recogniser; a page that is not music never downloads the transformer, and
-`{ ocr: false }` never downloads the OCR models, except the recogniser on a
-page with a five-line tablature candidate. On an Apple M-series laptop with WebGPU a page takes 7 to
+models, and a fourth time first of all when the tab guard or the tab reader
+needs the OCR recogniser; a page that is not music never downloads the
+transformer, and `{ ocr: false }` never downloads the OCR models, except the
+recogniser on a page with tablature or a five-line tablature candidate. On an Apple M-series laptop with WebGPU a page takes 7 to
 9 seconds once the models are cached, of which the OCR is about 3 seconds
 (about 5 on WebAssembly threads); `readTextStrips` alone takes about 2.5
 seconds. Under Node on one WebAssembly thread a page takes about 55 seconds,

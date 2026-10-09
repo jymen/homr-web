@@ -2,8 +2,8 @@
  * homr's process_image without file IO or debug images, then the app server's
  * chord OCR: one BGR page in, the app server's result shape out. The Worker
  * and the Node golden test both call `recognizePage`; neither has to know
- * what a stage is. Before homr, the tab guard paints line tablature white,
- * so homr never reads a tab as a staff.
+ * what a stage is. Before homr, the tab guard reads line tablature's frets
+ * and paints it white, so homr never reads a tab as a staff.
  */
 
 import type { OpenCv } from "../cv/opencv.js";
@@ -34,9 +34,9 @@ import {
   type DetectedTab,
   detectTablature,
   type ReadCrops,
-  type TabSystem,
   whitenTablature,
 } from "../tab/detect.js";
+import { readTablature, type TabReading } from "../tab/read.js";
 import { detectStaffsInImage } from "./detect.js";
 import { parseStaffs } from "./parse-staffs.js";
 import { staffBoxes, staffPositions } from "./staff-positions.js";
@@ -264,8 +264,8 @@ async function readPage(
 }
 
 const hasTabs = (
-  tablature: readonly TabSystem[]
-): tablature is readonly [TabSystem, ...TabSystem[]] => tablature.length > 0;
+  tablature: readonly TabReading[]
+): tablature is readonly [TabReading, ...TabReading[]] => tablature.length > 0;
 
 /**
  * Never throws: every failure is `ok: false` with its reason as the last log
@@ -280,28 +280,32 @@ export async function recognizePage(
   const started = performance.now();
   const log: string[] = [];
   const elapsed = () => Math.round(performance.now() - started);
-  let tablature: TabSystem[] = [];
+  let tablature: TabReading[] = [];
   try {
     options.signal?.throwIfAborted();
-    const tabs: DetectedTab[] = await detectTablature(
+    const read = digitReader(engine, options.signal);
+    const tabs: DetectedTab[] = await detectTablature(engine.cv, page, read);
+    tablature = await readTablature(
       engine.cv,
       page,
-      digitReader(engine, options.signal)
+      tabs,
+      read,
+      (done, total) => options.onProgress?.({ done, stage: "tab", total })
     );
-    tablature = tabs.map((tab) => tab.system);
     if (hasTabs(tablature)) {
       log.push(
-        `Tab guard: ${tabs.length} tablature systems (${tablature.map((t) => t.lines).join(", ")} lines) painted out`
+        `Tab guard: ${tabs.length} tablature systems (${tablature.map((t) => t.lines).join(", ")} lines) painted out`,
+        `Tab reader: ${tablature.map((t) => t.events.length).join(", ")} events`
       );
     }
-    const read = await readPage(
+    const reading = await readPage(
       tabs.length === 0 ? page : whitenTablature(page, tabs, TAB_MARGIN),
       engine,
       log,
       options
     );
     return {
-      ...read,
+      ...reading,
       backend: engine.backend,
       durationMs: elapsed(),
       log: log.join("\n"),

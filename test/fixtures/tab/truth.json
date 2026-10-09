@@ -1,0 +1,340 @@
+{
+  "generator": "tools/typeset-tab.mjs",
+  "pages": [
+    {
+      "file": "banjo-5-lines.png",
+      "width": 2480,
+      "height": 3508,
+      "tuning": ["D4", "B3", "G3", "D3", "G4"],
+      "capo": 0,
+      "systems": [
+        {
+          "lines": 5,
+          "spacing": 42,
+          "top": 520,
+          "events": [
+            { "x": 302, "notes": [{ "string": 1, "fret": 0 }] },
+            { "x": 386, "notes": [{ "string": 2, "fret": 1 }] },
+            { "x": 470, "notes": [{ "string": 3, "fret": 2 }] },
+            { "x": 554.5, "notes": [{ "string": 4, "fret": 3 }] },
+            { "x": 638, "notes": [{ "string": 5, "fret": 0 }] },
+            { "x": 722, "notes": [{ "string": 1, "fret": 4 }] },
+            { "x": 806, "notes": [{ "string": 2, "fret": 5 }] },
+            { "x": 890.5, "notes": [{ "string": 3, "fret": 6 }] },
+            { "x": 974, "notes": [{ "string": 4, "fret": 7 }] },
+            { "x": 1058, "notes": [{ "string": 5, "fret": 0 }] },
+            { "x": 1142, "notes": [{ "string": 1, "fret": 8 }] },
+            { "x": 1226.5, "notes": [{ "string": 2, "fret": 9 }] },
+            { "x": 1310.5, "notes": [{ "string": 3, "fret": 10 }] },
+            { "x": 1394.5, "notes": [{ "string": 1, "fret": 12 }] },
+            {
+              "x": 1478,
+              "notes": [
+                { "string": 1, "fret": 0 },
+                { "string": 2, "fret": 1 },
+                { "string": 3, "fret": 2 }
+              ]
+            },
+            { "x": 1562, "notes": [{ "string": 4, "fret": 0 }] },
+            { "x": 1672, "notes": [{ "string": 4, "fret": 2 }] }
+          ],
+          "annotations": [{ "x": 1617.5, "string": 4, "technique": "Sl" }],
+          "arcs": 0
+        },
+        {
+          "lines": 5,
+          "spacing": 42,
+          "top": 982,
+          "events": [
+            { "x": 303, "notes": [{ "string": 3, "fret": 2 }] },
+            { "x": 413, "notes": [{ "string": 3, "fret": 0 }] },
+            {
+              "x": 497,
+              "notes": [
+                { "string": 2, "fret": 0 },
+                { "string": 3, "fret": 0 },
+                { "string": 4, "fret": 2 }
+              ]
+            },
+            { "x": 581, "notes": [{ "string": 5, "fret": 0 }] },
+            { "x": 664.5, "notes": [{ "string": 1, "fret": 3 }] },
+            { "x": 749, "notes": [{ "string": 1, "fret": 2 }] },
+            { "x": 832.5, "notes": [{ "string": 2, "fret": 3 }] },
+            { "x": 942, "notes": [{ "string": 2, "fret": 5 }] },
+            { "x": 1026, "notes": [{ "string": 4, "fret": 4 }] },
+            { "x": 1110, "notes": [{ "string": 5, "fret": 0 }] },
+            {
+              "x": 1194,
+              "notes": [
+                { "string": 1, "fret": 0 },
+                { "string": 3, "fret": 2 },
+                { "string": 4, "fret": 2 }
+              ]
+            },
+            { "x": 1277.5, "notes": [{ "string": 1, "fret": 10 }] },
+            { "x": 1361.5, "notes": [{ "string": 2, "fret": 12 }] }
+          ],
+          "annotations": [
+            { "x": 358.5, "string": 3, "technique": "Po" },
+            { "x": 887.5, "string": 2, "technique": "H" }
+          ],
+          "arcs": 1
+        },
+        {
+          "lines": 5,
+          "spacing": 42,
+          "top": 1444,
+          "events": [
+            { "x": 302, "notes": [{ "string": 4, "fret": 5 }] },
+            { "x": 412, "notes": [{ "string": 4, "fret": 4 }] },
+            { "x": 496, "notes": [{ "string": 3, "fret": 2 }] },
+            { "x": 580, "notes": [{ "string": 2, "fret": 1 }] },
+            {
+              "x": 664,
+              "notes": [
+                { "string": 1, "fret": 0 },
+                { "string": 2, "fret": 0 },
+                { "string": 3, "fret": 0 }
+              ]
+            },
+            { "x": 748, "notes": [{ "string": 5, "fret": 0 }] },
+            { "x": 832, "notes": [{ "string": 4, "fret": 0 }] },
+            { "x": 916, "notes": [{ "string": 3, "fret": 7 }] },
+            { "x": 1000, "notes": [{ "string": 2, "fret": 8 }] },
+            { "x": 1083.5, "notes": [{ "string": 1, "fret": 9 }] },
+            { "x": 1167.5, "notes": [{ "string": 2, "fret": 10 }] },
+            { "x": 1276.5, "notes": [{ "string": 2, "fret": 12 }] },
+            {
+              "x": 1360.8,
+              "notes": [
+                { "string": 1, "fret": 2 },
+                { "string": 2, "fret": 3 },
+                { "string": 4, "fret": 4 }
+              ]
+            }
+          ],
+          "annotations": [
+            { "x": 357.5, "string": 4, "technique": "R" },
+            { "x": 1222.5, "string": 2, "technique": "Sl" }
+          ],
+          "arcs": 0
+        }
+      ]
+    },
+    {
+      "file": "guitar-6-lines.png",
+      "width": 2480,
+      "height": 3508,
+      "tuning": ["E4", "B3", "G3", "D3", "A2", "E2"],
+      "capo": 0,
+      "systems": [
+        {
+          "lines": 6,
+          "spacing": 31,
+          "top": 520,
+          "events": [
+            { "x": 278, "notes": [{ "string": 6, "fret": 0 }] },
+            { "x": 340.5, "notes": [{ "string": 5, "fret": 2 }] },
+            { "x": 402.5, "notes": [{ "string": 4, "fret": 2 }] },
+            { "x": 464, "notes": [{ "string": 3, "fret": 1 }] },
+            { "x": 526, "notes": [{ "string": 2, "fret": 0 }] },
+            { "x": 588, "notes": [{ "string": 1, "fret": 0 }] },
+            {
+              "x": 650.5,
+              "notes": [{ "string": 4, "fret": 2 }, { "string": 5, "fret": 3 }]
+            },
+            { "x": 712, "notes": [{ "string": 4, "fret": 0 }] },
+            { "x": 792.5, "notes": [{ "string": 4, "fret": 2 }] },
+            { "x": 855, "notes": [{ "string": 3, "fret": 0 }] },
+            { "x": 935.5, "notes": [{ "string": 3, "fret": 2 }] },
+            {
+              "x": 997.2,
+              "notes": [
+                { "string": 1, "fret": 0 },
+                { "string": 2, "fret": 1 },
+                { "string": 3, "fret": 0 },
+                { "string": 4, "fret": 2 },
+                { "string": 5, "fret": 3 }
+              ]
+            },
+            { "x": 1059.5, "notes": [{ "string": 6, "fret": 3 }] },
+            { "x": 1139.5, "notes": [{ "string": 6, "fret": 5 }] },
+            {
+              "x": 1201.5,
+              "notes": [{ "string": 1, "fret": 3 }, { "string": 2, "fret": 3 }]
+            },
+            { "x": 1263.5, "notes": [{ "string": 1, "fret": 5 }] },
+            { "x": 1325.5, "notes": [{ "string": 1, "fret": 7 }] },
+            { "x": 1387.5, "notes": [{ "string": 2, "fret": 8 }] },
+            { "x": 1449.5, "notes": [{ "string": 3, "fret": 9 }] },
+            { "x": 1511.5, "notes": [{ "string": 4, "fret": 10 }] },
+            { "x": 1573.5, "notes": [{ "string": 5, "fret": 11 }] },
+            { "x": 1636, "notes": [{ "string": 6, "fret": 12 }] },
+            {
+              "x": 1697.8,
+              "notes": [
+                { "string": 1, "fret": 0 },
+                { "string": 2, "fret": 0 },
+                { "string": 3, "fret": 1 },
+                { "string": 4, "fret": 2 },
+                { "string": 5, "fret": 2 },
+                { "string": 6, "fret": 0 }
+              ]
+            }
+          ],
+          "annotations": [
+            { "x": 753, "string": 4, "technique": "h" },
+            { "x": 895, "string": 3, "technique": "p" },
+            { "x": 1099.5, "string": 6, "technique": "x" }
+          ],
+          "arcs": 0
+        },
+        {
+          "lines": 6,
+          "spacing": 31,
+          "top": 892,
+          "events": [
+            { "x": 283, "notes": [{ "string": 1, "fret": 12 }] },
+            { "x": 446, "notes": [{ "string": 1, "fret": 12 }] },
+            { "x": 508.5, "notes": [{ "string": 2, "fret": 10 }] },
+            { "x": 570.5, "notes": [{ "string": 3, "fret": 9 }] },
+            {
+              "x": 632.5,
+              "notes": [
+                { "string": 3, "fret": 7 },
+                { "string": 4, "fret": 9 },
+                { "string": 5, "fret": 9 }
+              ]
+            },
+            { "x": 694.5, "notes": [{ "string": 6, "fret": 7 }] },
+            { "x": 756.5, "notes": [{ "string": 4, "fret": 5 }] },
+            { "x": 836.5, "notes": [{ "string": 4, "fret": 7 }] },
+            {
+              "x": 898.5,
+              "notes": [
+                { "string": 2, "fret": 5 },
+                { "string": 3, "fret": 5 },
+                { "string": 4, "fret": 5 },
+                { "string": 5, "fret": 7 }
+              ]
+            },
+            { "x": 961, "notes": [{ "string": 3, "fret": 4 }] },
+            { "x": 1041.5, "notes": [{ "string": 3, "fret": 2 }] },
+            { "x": 1103, "notes": [{ "string": 5, "fret": 0 }] },
+            { "x": 1183.5, "notes": [{ "string": 5, "fret": 3 }] },
+            {
+              "x": 1245.6,
+              "notes": [
+                { "string": 1, "fret": 3 },
+                { "string": 2, "fret": 3 },
+                { "string": 3, "fret": 4 },
+                { "string": 4, "fret": 5 },
+                { "string": 5, "fret": 5 },
+                { "string": 6, "fret": 3 }
+              ]
+            },
+            { "x": 1308, "notes": [{ "string": 6, "fret": 12 }] },
+            { "x": 1369.5, "notes": [{ "string": 1, "fret": 10 }] },
+            { "x": 1431.5, "notes": [{ "string": 2, "fret": 11 }] }
+          ],
+          "annotations": [
+            { "x": 364.5, "string": 1, "technique": "Harm." },
+            { "x": 796, "string": 4, "technique": "h" },
+            { "x": 1001, "string": 3, "technique": "p" },
+            { "x": 1143.5, "string": 5, "technique": "x" }
+          ],
+          "arcs": 0
+        }
+      ]
+    },
+    {
+      "file": "mandolin-4-lines.png",
+      "width": 2480,
+      "height": 3508,
+      "tuning": ["E5", "A4", "D4", "G3"],
+      "capo": 0,
+      "systems": [
+        {
+          "lines": 4,
+          "spacing": 36,
+          "top": 520,
+          "events": [
+            { "x": 252, "notes": [{ "string": 4, "fret": 0 }] },
+            { "x": 324.5, "notes": [{ "string": 4, "fret": 2 }] },
+            { "x": 396, "notes": [{ "string": 4, "fret": 4 }] },
+            { "x": 468, "notes": [{ "string": 3, "fret": 0 }] },
+            { "x": 540.5, "notes": [{ "string": 3, "fret": 2 }] },
+            { "x": 612, "notes": [{ "string": 3, "fret": 4 }] },
+            { "x": 684, "notes": [{ "string": 2, "fret": 0 }] },
+            { "x": 756.5, "notes": [{ "string": 2, "fret": 2 }] },
+            { "x": 828, "notes": [{ "string": 2, "fret": 4 }] },
+            { "x": 900, "notes": [{ "string": 1, "fret": 0 }] },
+            { "x": 972.5, "notes": [{ "string": 1, "fret": 2 }] },
+            { "x": 1044, "notes": [{ "string": 1, "fret": 3 }] },
+            { "x": 1116, "notes": [{ "string": 1, "fret": 5 }] },
+            { "x": 1188.5, "notes": [{ "string": 1, "fret": 7 }] },
+            { "x": 1260, "notes": [{ "string": 1, "fret": 10 }] },
+            { "x": 1332.5, "notes": [{ "string": 1, "fret": 12 }] },
+            {
+              "x": 1404.3,
+              "notes": [{ "string": 2, "fret": 0 }, { "string": 3, "fret": 2 }]
+            },
+            {
+              "x": 1476.3,
+              "notes": [
+                { "string": 1, "fret": 0 },
+                { "string": 2, "fret": 2 },
+                { "string": 3, "fret": 2 },
+                { "string": 4, "fret": 0 }
+              ]
+            },
+            { "x": 1548, "notes": [{ "string": 2, "fret": 10 }] },
+            { "x": 1620.5, "notes": [{ "string": 3, "fret": 11 }] }
+          ],
+          "annotations": [],
+          "arcs": 0
+        },
+        {
+          "lines": 4,
+          "spacing": 36,
+          "top": 880,
+          "events": [
+            { "x": 252, "notes": [{ "string": 1, "fret": 0 }] },
+            { "x": 324.5, "notes": [{ "string": 2, "fret": 2 }] },
+            { "x": 396, "notes": [{ "string": 3, "fret": 4 }] },
+            { "x": 468, "notes": [{ "string": 4, "fret": 5 }] },
+            { "x": 540.5, "notes": [{ "string": 1, "fret": 7 }] },
+            { "x": 612, "notes": [{ "string": 2, "fret": 9 }] },
+            { "x": 684.5, "notes": [{ "string": 3, "fret": 12 }] },
+            { "x": 756, "notes": [{ "string": 4, "fret": 10 }] },
+            {
+              "x": 828.3,
+              "notes": [{ "string": 1, "fret": 0 }, { "string": 2, "fret": 2 }]
+            },
+            {
+              "x": 900,
+              "notes": [{ "string": 3, "fret": 3 }, { "string": 4, "fret": 5 }]
+            },
+            { "x": 972, "notes": [{ "string": 1, "fret": 5 }] },
+            { "x": 1044, "notes": [{ "string": 1, "fret": 3 }] },
+            { "x": 1116.5, "notes": [{ "string": 1, "fret": 2 }] },
+            { "x": 1188, "notes": [{ "string": 2, "fret": 5 }] },
+            { "x": 1260, "notes": [{ "string": 2, "fret": 3 }] },
+            { "x": 1332.5, "notes": [{ "string": 2, "fret": 2 }] },
+            { "x": 1404.5, "notes": [{ "string": 3, "fret": 7 }] },
+            { "x": 1476, "notes": [{ "string": 4, "fret": 0 }] },
+            {
+              "x": 1548.3,
+              "notes": [
+                { "string": 1, "fret": 12 },
+                { "string": 2, "fret": 10 }
+              ]
+            }
+          ],
+          "annotations": [],
+          "arcs": 0
+        }
+      ]
+    }
+  ]
+}

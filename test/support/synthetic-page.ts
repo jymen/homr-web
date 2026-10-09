@@ -52,7 +52,13 @@ function drawLines(
   }
 }
 
-/** Fret numbers 0 to 12 across the system, one per column, cycling over the lines. */
+/** What `drawPage` prints on a tab: one fret per column, 0 to 12, cycling over the lines; `string` 1 is the top line. */
+export const drawnFrets = (lines: number) =>
+  Array.from({ length: 32 }, (_, column) => ({
+    fret: (column * 7) % 13,
+    string: (column % lines) + 1,
+  }));
+
 function drawFrets(
   cv: OpenCv,
   page: Mat,
@@ -61,9 +67,9 @@ function drawFrets(
   spacing: number
 ): void {
   const scale = spacing / 30;
-  for (let column = 0; column < 32; column += 1) {
-    const text = String((column * 7) % 13);
-    const line = column % lines;
+  for (const [column, { fret, string }] of drawnFrets(lines).entries()) {
+    const text = String(fret);
+    const line = string - 1;
     const x = X0 + 40 + column * 32;
     const y = top + line * spacing;
     // Hershey simplex digits are about 22 px tall and 20 px wide at scale 1; this build has no getTextSize.

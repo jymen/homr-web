@@ -50,7 +50,7 @@ export interface TextOptions {
 }
 
 export interface RecognizeOptions extends TextOptions {
-  /** Read the chord strips and the title. Default true; false leaves `texts` empty and `work-title` blank, and never loads the OCR models but the recogniser the tab guard needs on a page with a five-line tablature candidate. */
+  /** Read the chord strips and the title. Default true; false leaves `texts` empty and `work-title` blank, and never loads the OCR models but the recogniser, which the tab guard and reader need on a page with tablature or a five-line tablature candidate. */
   readonly ocr?: boolean;
 }
 

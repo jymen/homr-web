@@ -3,12 +3,19 @@
  * (AbcGoDb, abcsql/omr.go) field for field, plus `backend`, so the app's
  * transcriber page reads a browser result and a server result the same way.
  * `tablature` is browser-only for now: the server has no tab guard, so its
- * result has no such field.
+ * result has no such field. Each of its systems carries the frets read on it.
  */
 
-import type { TabSystem } from "./tab/detect.js";
+import type { TabReading } from "./tab/read.js";
 
 export type { TabSystem } from "./tab/detect.js";
+export type {
+  TabAnnotation,
+  TabEvent,
+  TabNote,
+  TabReading,
+  TabTechnique,
+} from "./tab/read.js";
 
 export const BACKENDS = ["webgpu", "wasm-threads", "wasm"] as const;
 /** Chosen once per Worker by startRuntime and frozen before the first session. */
@@ -52,14 +59,16 @@ export interface PageText {
  * page a recognizer reads. The segmentation model opens before `segment`, the
  * transformer's two after `detect` and the three OCR models before `ocr`, so
  * `models` appears three times on a first page (four when the tab guard opens
- * the OCR recogniser first, on a page with a five-line tablature candidate),
+ * the OCR recogniser first, on a page with tablature),
  * and a page that is not music, or read with `ocr: false`, stops short of the
- * total. `segment` counts segnet
+ * total. `tab` counts the tab systems read, and appears only on a page that
+ * has one. `segment` counts segnet
  * batches, `dewarp` and `staff` count staffs, `ocr` counts the chord strips
  * and the title band, `detect` and `xml` go from 0/1 to 1/1.
  */
 export const PROGRESS_STAGES = [
   "models",
+  "tab",
   "segment",
   "detect",
   "dewarp",
@@ -113,8 +122,8 @@ export interface RecognizeSuccess extends ResultBase {
   readonly musicXml: string;
   readonly ok: true;
   readonly staves: readonly StaffBox[];
-  /** The tab systems found and kept out of homr's reading, empty on a page without any. Never in `staves`. */
-  readonly tablature: readonly TabSystem[];
+  /** The tab systems found, kept out of homr's reading and read on their own, empty on a page without any. Never in `staves`. */
+  readonly tablature: readonly TabReading[];
   readonly texts: readonly PageText[];
 }
 
@@ -133,7 +142,7 @@ export type RecognizeFailure =
     })
   | (FailureBase & {
       readonly error: "tablature_only";
-      readonly tablature: readonly [TabSystem, ...TabSystem[]];
+      readonly tablature: readonly [TabReading, ...TabReading[]];
     });
 
 /** Failure is a result, never a thrown error, as on the server: the page keeps one shape. */
@@ -159,7 +168,7 @@ export const failedResult = (
 
 export const tablatureOnlyResult = (
   backend: Backend,
-  tablature: readonly [TabSystem, ...TabSystem[]],
+  tablature: readonly [TabReading, ...TabReading[]],
   log: string,
   durationMs: number
 ): RecognizeFailure => ({
