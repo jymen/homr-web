@@ -76,6 +76,13 @@ export interface Mark extends Box {
  */
 type Evidence = "tab" | "staff" | readonly ColorImage[];
 
+/** A line group, what decides whether it is a tab, and the share of its marks knocked out (undefined under four marks). */
+interface Candidate {
+  readonly evidence: Evidence;
+  readonly group: LineGroup;
+  readonly knockedOut: number | undefined;
+}
+
 /** Reads crops as text; the pipeline's reader is RapidOCR's recogniser, opened on the first call. */
 export type ReadCrops = (crops: readonly ColorImage[]) => Promise<string[]>;
 
@@ -83,6 +90,11 @@ const TAB = {
   /** Crop padding, in line spacings. */
   cropPad: 0.25,
   gapTolerance: 0.2,
+  /**
+   * A mark is knocked out when its line is blank within this many line
+   * spacings on both sides of it ("—10—"), as tab software prints a fret.
+   */
+  knockOutReach: 0.15,
   /** The band read for marks, in line spacings above the top line and below the bottom one. */
   markBand: 0.75,
   /**
@@ -105,6 +117,12 @@ const TAB = {
   minDigits: 4,
   /** Consecutive line gaps: at least 5 px, at most 3% of the page height, within 20% of the first. */
   minGap: 5,
+  /**
+   * The share of a group's marks knocked out for it to count as printed that
+   * way: tabs measure 0.81 to 1.00 where their program knocks out, staves
+   * with fingering digits 0.00.
+   */
+  minKnockOutShare: 0.5,
   /** A mark is digit sized: height and width bounds in line spacings. */
   minMarkHeight: 0.35,
   minMarkWidth: 0.08,
@@ -121,6 +139,12 @@ const TAB = {
   onLine: 0.3,
   /** Marks read per recogniser run (RapidOCR's own batch), and at most this many per group. */
   readBatch: 6,
+  /**
+   * A group whose numbers are not knocked out is dropped only when its line
+   * spacing is further than this share from every knocked-out tab's: a staff
+   * is drawn smaller than its tab (27 against 41, 22 against 33 px).
+   */
+  sameSizeTolerance: 0.2,
   sampleSize: 12,
   thicknessShare: 1 / 400,
 } as const;
@@ -554,6 +578,66 @@ async function marksAreNumbers(
   return false;
 }
 
+/** The share of the marks whose line is blank just left and just right of them; undefined under `minDigits` marks. */
+function knockedOutShare(
+  ink: Uint8Array,
+  width: number,
+  group: LineGroup,
+  marks: readonly Mark[]
+): number | undefined {
+  if (marks.length < TAB.minDigits) {
+    return;
+  }
+  const reach = Math.max(2, Math.round(TAB.knockOutReach * group.spacing));
+  const blank = (line: PageLine, x: number) => {
+    if (x < 0 || x >= width) {
+      return false;
+    }
+    for (let y = line.y0; y <= line.y1; y += 1) {
+      if (ink[y * width + x] === 1) {
+        return false;
+      }
+    }
+    return true;
+  };
+  const blankWithin = (line: PageLine, from: number, step: 1 | -1) =>
+    Array.from({ length: reach }, (_, k) => from + step * (k + 1)).some((x) =>
+      blank(line, x)
+    );
+  const knocked = marks.filter((mark) => {
+    const line = group.lines[mark.line] as PageLine;
+    return (
+      blankWithin(line, mark.x, -1) && blankWithin(line, mark.x + mark.w - 1, 1)
+    );
+  });
+  return knocked.length / marks.length;
+}
+
+/**
+ * One program prints a page's tabs one way and at one size: when a tab on the
+ * page knocks its numbers out, a group whose numbers sit on unbroken lines and
+ * whose line spacing is another size is a staff (the fingering digits of
+ * Guitar Pro's staves, or a staff missing the line a beam thickened). Pages
+ * whose tabs print over their lines keep every tab, and so does a tab without
+ * knock-outs drawn at the knocked-out tabs' size.
+ */
+function keepPrintedAlike(tabs: readonly Candidate[]): Candidate[] {
+  const knocks = (c: Candidate) =>
+    c.knockedOut !== undefined && c.knockedOut >= TAB.minKnockOutShare;
+  const sizes = tabs.filter(knocks).map((c) => c.group.spacing);
+  const sameSize = (c: Candidate) =>
+    sizes.some(
+      (size) => Math.abs(c.group.spacing - size) <= TAB.sameSizeTolerance * size
+    );
+  return tabs.filter(
+    (c) =>
+      sizes.length === 0 ||
+      c.knockedOut === undefined ||
+      knocks(c) ||
+      sameSize(c)
+  );
+}
+
 const toSystem = (
   group: LineGroup,
   index: number,
@@ -585,32 +669,35 @@ export async function detectTablature(
   const groups = withMatScope((scope) => {
     const ink = new Uint8Array(inkOf(cv, scope, page).data);
     return groupLines(findLines(ink, page.width, page.height), page.height).map(
-      (group): { group: LineGroup; evidence: Evidence } => {
-        if (group.lines.length !== 5) {
-          return { evidence: "tab", group };
-        }
+      (group): Candidate => {
         const { marks } = marksOf(cv, ink, page.width, page.height, group);
+        const knockedOut = knockedOutShare(ink, page.width, group, marks);
+        if (group.lines.length !== 5) {
+          return { evidence: "tab", group, knockedOut };
+        }
         return {
           evidence:
             marks.length < TAB.minDigits
               ? "staff"
               : marks.map((mark) => cropOf(page, ink, mark, group.spacing)),
           group,
+          knockedOut,
         };
       }
     );
   });
-  const tabs: LineGroup[] = [];
-  for (const { evidence, group } of groups) {
+  const candidates: Candidate[] = [];
+  for (const candidate of groups) {
+    const { evidence } = candidate;
     const isTab =
       evidence === "tab" ||
       // biome-ignore lint/performance/noAwaitInLoops: one recogniser session, one batch at a time
       (evidence !== "staff" && (await marksAreNumbers(evidence, read)));
     if (isTab) {
-      tabs.push(group);
+      candidates.push(candidate);
     }
   }
-  return tabs.map((group, index) => ({
+  return keepPrintedAlike(candidates).map(({ group }, index) => ({
     group,
     system: toSystem(group, index, page.width, page.height),
   }));

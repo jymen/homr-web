@@ -210,6 +210,10 @@ chord diagrams above the first tab. A page without a tab pays nothing.
   first system nothing, since the margin label sits beside the real first
   tab. The accuracy table scores the systems' most common reading for that
   reason. These pages were not in step 1's 15-page truth; they belong to it.
+  Fixed 2026-10-10: on a page whose tabs knock their numbers out, a group
+  whose numbers sit on unbroken lines and whose line spacing is another size
+  is a staff (`decisions.tsv`, tab-1);
+  both pages now report 3 and 4, and joined the truth (63 tabs, 17 pages).
 - **The guard finds no tab on the two phone photographs**, so their text is
   never read; neither prints a tuning.
 - **A label split across regions is lost.** The header band and a margin
@@ -224,6 +228,4 @@ chord diagrams above the first tab. A page without a tab pays nothing.
 - **The app's correction UI.** A wrong tuning moves every pitch; the result
   carries `text` and `confidence` so the app can show what was read and let
   the musician change it, passing their own tuning to `pitchTab`.
-- **The guard's false tabs on Guitar Pro score-and-tab pages** (above), a
-  step-1 fix.
 - **Step 4, rhythm**, and **step 5, scans**, unchanged from tab-2.
