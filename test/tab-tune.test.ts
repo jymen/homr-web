@@ -370,6 +370,37 @@ describe("durations from the marks", () => {
     expect(prerequisites.durations.status).toBe("read");
   });
 
+  it("lets each repeated part open on an upbeat that the bar closing it completes", () => {
+    at = 0;
+    const opening = { ...bar(), repeatStart: true };
+    const events = [ev(Q, [1, 0])];
+    const second = bar();
+    events.push(ev(Q, [1, 0]), ev(Q, [2, 0]), ev(Q, [3, 0]), ev(Q, [4, 0]));
+    const third = bar();
+    events.push(ev(Q, [1, 0]), ev(Q, [2, 0]), ev(Q, [3, 0]));
+    const end = { ...bar(), repeatEnd: true };
+    const partB = { ...bar(), repeatStart: true };
+    events.push(ev(E, [1, 0]), ev(E, [1, 2]));
+    const last = bar();
+    events.push(ev(Q, [1, 0]), ev(Q, [2, 0]), ev(Q, [3, 0]), ev(Q, [4, 0]));
+    const prerequisites = tabPrerequisites(
+      [
+        system({
+          barlines: [opening, second, third, end, partB, last],
+          events,
+        }),
+      ],
+      { meter: { den: 4, num: 4 } }
+    );
+    expect(prerequisites.bars.map((b) => [b.read, b.fits, b.pickup])).toEqual([
+      [1, true, true],
+      [4, true, false],
+      [3, true, false],
+      [1, true, true],
+      [4, true, false],
+    ]);
+  });
+
   it("takes no time for a grace note and strikes it before the next note", () => {
     at = 0;
     const grace = { ...ev(Q, [3, 2]), grace: true };

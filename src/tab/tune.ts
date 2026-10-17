@@ -138,8 +138,9 @@ export interface TabBarCheck {
   readonly fits: boolean;
   readonly open: number;
   /**
-   * A first bar no longer than half the meter, all its notes stemmed: an
-   * upbeat. The last bar may then be short by as much.
+   * The first bar of the tune or of a repeated part, no longer than half the
+   * meter, all its notes stemmed: an upbeat. The bar closing that part (its
+   * repeat end, or the tune's last bar) may then be short by as much.
    */
   readonly pickup: boolean;
   readonly read: number;
@@ -231,7 +232,7 @@ export interface TabTuneBar {
   readonly systemBreakBefore: boolean;
 }
 
-/** A playable tune: every prerequisite settled, every bar the meter's length, but an upbeat of at most half a bar and a last bar that completes it. */
+/** A playable tune: every prerequisite settled, every bar the meter's length, but an upbeat of at most half a bar opening the tune or a repeated part, and the bar closing that part completing it. */
 export interface TabTune {
   readonly bars: readonly TabTuneBar[];
   readonly capo: number;
@@ -291,6 +292,20 @@ export function durationOfStem(stem: TabStem): Duration | undefined {
 }
 
 const lengthOf = (d: EventDuration) => (d === "grace" ? 0 : ticksOf(d));
+
+/** Whether a bar ends a part (its repeat end, or the tune's end) and completes the part's upbeat. */
+const closesPart = (
+  bar: RawBar,
+  last: boolean,
+  known: number,
+  upbeat: number | undefined,
+  full: number
+): boolean =>
+  (bar.repeatEnd || last) && upbeat !== undefined && known + upbeat === full;
+
+/** The long value of `ticks`, when an unstemmed note can take it. */
+const longOf = (ticks: number): Duration | undefined =>
+  LONG.find((d) => ticksOf(d) === ticks);
 
 /** Long values an unstemmed note may take, longest first. */
 const LONG: readonly Duration[] = [
@@ -370,28 +385,28 @@ function fitBars(
       const d = read[bar.system]?.[e];
       return sum + (d === undefined ? Number.NaN : lengthOf(d));
     }, 0);
-  const first = bars[0] === undefined ? Number.NaN : lengthOfBar(bars[0]);
-  const upbeat = first > 0 && first <= full / 2 ? first : undefined;
+  const upbeatOf = (bar: RawBar, count: number) => {
+    const length = lengthOfBar(bar);
+    return count > 1 && length > 0 && length <= full / 2 ? length : undefined;
+  };
+  let upbeat: number | undefined;
   const checks = bars.map((bar, index): TabBarCheck => {
     const values = bar.events.map((e) => read[bar.system]?.[e]);
     const known = values.reduce((sum, d) => sum + (d ? lengthOf(d) : 0), 0);
     const open = values.filter((d) => d === undefined).length;
-    const share = open === 0 ? 0 : (full - known) / open;
-    const long = LONG.find((d) => ticksOf(d) === share);
-    if (long !== undefined) {
-      for (const [k, e] of bar.events.entries()) {
-        if (values[k] === undefined) {
-          (durations[bar.system] as EventDuration[])[e] = long;
-        }
+    const long = open === 0 ? undefined : longOf((full - known) / open);
+    for (const [k, e] of bar.events.entries()) {
+      if (long !== undefined && values[k] === undefined) {
+        (durations[bar.system] as EventDuration[])[e] = long;
       }
     }
-    const pickup = index === 0 && upbeat !== undefined && bars.length > 1;
+    const opens = index === 0 || bar.repeatStart;
+    upbeat = opens ? upbeatOf(bar, bars.length) : upbeat;
+    const pickup = opens && upbeat !== undefined;
     const closing =
-      index === bars.length - 1 &&
-      index > 0 &&
+      !opens &&
       open === 0 &&
-      upbeat !== undefined &&
-      known + upbeat === full;
+      closesPart(bar, index === bars.length - 1, known, upbeat, full);
     return {
       bar: index,
       expected: quarters(full),
@@ -618,7 +633,7 @@ function durationsOf(
             evidence: `${evidence}; not: ${unfit
               .map(
                 (c) =>
-                  `bar ${c.bar + 1} (system ${c.system + 1}) holds ${c.read} of ${c.expected} quarters`
+                  `bar ${c.bar + 1} (system ${c.system + 1}) holds ${c.read} of ${c.expected} quarters${unstemmed(c.open)}`
               )
               .join(", ")}`,
             read: `stems under ${stemmed} of ${events} notes`,
@@ -626,6 +641,16 @@ function durationsOf(
           },
   };
 }
+
+/** The unstemmed notes a bar check counts, as words after its quarters. */
+const unstemmed = (open: number): string => {
+  if (open === 0) {
+    return "";
+  }
+  return open === 1
+    ? " and a note with no stem"
+    : ` and ${open} notes with no stem`;
+};
 
 const settled = <T>(p: Prerequisite<T>): T | undefined =>
   p.status === "missing" ? undefined : p.value;
