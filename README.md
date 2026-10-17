@@ -35,7 +35,7 @@ if (result.ok) {
   render(result.musicXml); // MusicXML 4.0, one part per voice, homr's title in work-title
   console.log(result.staves); // [{ index, cx, cy, w, h }], page-normalised, top to bottom
   console.log(result.texts); // [{ staff, text, score, x0, y0, x1, y1 }], the chords above each staff
-  console.log(result.tablature); // [{ index, lines, cx, cy, w, h, events, annotations, unread }], tab systems and their frets
+  console.log(result.tablature); // [{ index, lines, cx, cy, w, h, events, barlines, slurs, ... }], tab systems, their frets and rhythm
 } else {
   console.warn(result.error, result.log);
 }
@@ -94,14 +94,16 @@ of 56; it finds nothing on a low-resolution phone photograph (lines 5 px
 apart), where homr reads the tab as before.
 
 Each tab system then has its frets read: every digit-sized mark sitting on a
-line is read by the same recogniser, on its own.
+line is read by the same recogniser, on its own (or taken from the PDF's text
+layer, below). A fret printed touching its stem, or touching the frets
+stacked over it, is cut from them between the lines first.
 
 ```ts
 for (const tab of result.tablature) {
   tab.lines; // 4, 5 or 6
   tab.events; // [{ x, notes: [{ string, fret }, ...] }], left to right
   tab.annotations; // [{ x, string, technique }]: "Sl", "Po", "H", "R", "p", "h", "x", "Harm."
-  tab.unread; // marks on the lines that read as neither: the TAB clef, a time signature
+  tab.unread; // marks on the lines that read as neither: the TAB clef
 }
 ```
 
@@ -112,8 +114,111 @@ they are kept beside the events, not attached to them. The reader is built
 for born-digital tabs: on four vector PDFs it reads every event of a
 hand-transcribed system (83 of 83) and agrees with the staff printed above
 the tab on all 115 events of a mandolin page, while on a scanned page whose
-lines strike through the digits it reads almost nothing. It reads no rhythm
-yet.
+lines strike through the digits it reads almost nothing.
+
+Each system also carries the rhythm the page hangs around its frets:
+
+```ts
+for (const tab of result.tablature) {
+  tab.events; // [{ x, notes, stem, grace }]: stem { kind: "stem", beams, dots } or { kind: "none" }
+  tab.barlines; // [{ x, thick, repeatStart, repeatEnd }], the system's opening line included
+  tab.slurs; // [{ from, to, string, kind, letter? }]: kind "tie", "hammer-on", "pull-off", "slide" or "slur"
+  tab.timeSignature; // { num: 4, den: 4, text: "4/4" }, on the system that prints one
+  tab.readFrom; // "image" or "text_layer"
+}
+```
+
+A stem with no beam is a quarter, each beam or flag halves it, and a fret
+with no stem is a half note or longer, which its bar decides. `grace` marks
+frets printed smaller than the system's and slurred into the next event;
+they take no time. A slur's `kind` comes from the letter printed by its arc
+(H, P, S, TablEdit's Po and Sl, LilyPond's h and p), and an arc between two
+equal frets with no letter is a tie. Stems are read below the tab, where
+TablEdit, Guitar Pro, LilyPond and Peghead Nation hang them; rests, tuplets
+and stems drawn above the tab are not read yet (docs/design/tab-4-findings.md).
+
+#### From a tab to a tune
+
+Turning a tab into a tune needs five facts first, by design. Positions become
+pitches with the instrument (its string count, a short string such as a
+five-string banjo's fifth, and courses), the tuning (one pitch per string)
+and the capo; order becomes a tune with the meter and the notes' durations.
+Each is read from the page with its source and confidence, assumed (only the
+capo, 0 when nothing is printed), or missing with what was read and the
+candidates. `resolveTab` builds the tune only when none is missing, and
+otherwise says which are, so the app can ask the musician for exactly those
+and call it again with the answers, on the same readings:
+
+```ts
+import { resolveTab } from "homr-web";
+
+const first = resolveTab(result.tablature);
+if (!first.ok) {
+  first.needs; // [{ field: "tuning", read: null, confidence: 0, evidence: "no tuning printed", candidates: [["D4", "B3", "G3", "D3", "G4"], ...] }]
+}
+const second = resolveTab(result.tablature, {
+  tuning: ["D4", "B3", "G3", "D3", "G4"], // what the musician chose
+  meter: { num: 4, den: 4 },
+});
+if (second.ok) {
+  second.tune.bars; // [{ events: [{ duration, notes: [{ string, fret, midi, techniques, tieToNext, tieFromPrevious }], graces }], repeatStart, repeatEnd, pickup, systemBreakBefore }]
+}
+```
+
+`prerequisites` on either answer holds all five as `{ status: "read",
+value, source, confidence, evidence }`, `{ status: "assumed", value,
+evidence }` or `{ status: "missing", read, confidence, candidates, evidence
+}`, and `bars` checks every bar against the meter. The instrument is read
+from a name in the page's text ("Clawhammer Banjo", "Mandolin") that fits the
+line count, or from five lines under a tuning whose bottom line is its
+highest string (a banjo's short string); the line count alone leaves it
+missing with the instruments of that count. Durations are missing on a page
+with no stems, and wherever a bar does not sum to the meter, with the bars
+named in `evidence`; an answer can give every note one value (`{ uniform }`)
+or correct single notes (`{ events: [{ system, event, duration }] }`). An
+upbeat of at most half a bar may open the tune or a repeated part, and the
+bar closing that part may be short by as much. An
+answer that does not fit the tab (a tuning for another string count) is not
+taken. The answers and the tune use MusicXML's vocabulary: `duration` is `{
+value: "quarter" | "eighth" | "16th" | ..., dots }`, a connecting technique
+sits on the note it starts from. Several pages of one tune resolve together:
+pass their readings in page order.
+
+#### A PDF's text layer
+
+When the page comes from a born-digital PDF, pass its text as `textLayer`:
+the frets, the slur letters, the time signature and the tuning, capo and
+instrument text are then taken from it, and the image only gives the
+geometry. On the 13 tab-only pages measured that have one, it matched as
+many frets to the exported MusicXML as the recogniser or more (88 for 78 on
+Blackberry Blossom, 155 for 142 on Old Joe Clark, 177 for 150 on Moon over
+Shanghai), and a page took 0.3 to 8 seconds in Node instead of 8 to 29. A
+digit a music font draws as a symbol carries no text; the recogniser reads
+those boxes from the image. Leave it out for a scan or a photo.
+
+```ts
+const page = await pdf.getPage(1);
+const viewport = page.getViewport({ scale: 1 });
+const textLayer = (await page.getTextContent()).items
+  .filter((item) => "str" in item && item.str.trim() !== "")
+  .map((item) => {
+    const [, , c, d, e, f] = item.transform;
+    const size = Math.hypot(c, d);
+    const [x0, y1] = viewport.convertToViewportPoint(e, f);
+    const [x1, y0] = viewport.convertToViewportPoint(e + item.width, f + size);
+    return {
+      text: item.str,
+      x0: Math.min(x0, x1) / viewport.width,
+      x1: Math.max(x0, x1) / viewport.width,
+      y0: Math.min(y0, y1) / viewport.height,
+      y1: Math.max(y0, y1) / viewport.height,
+    };
+  });
+const result = await recognizer.recognizePage(pngBlob, { textLayer });
+```
+
+A run turned a quarter (a tuning printed up the margin) is given by the box
+around it; test/support/pdf-text.ts does that for every rotation.
 
 Pitch needs the tuning and capo, which most tab pages print as text: "aDADE
 tuning", "gDGBD" beside the TAB clef, "Key of A (Capo 2)", "Accord : Open G",
@@ -181,7 +286,7 @@ OCR detector and classifier, which read the tuning and capo text. A page
 that is not music never downloads the transformer, and `{ ocr: false }`
 never downloads the OCR models, except the recogniser on a page with
 tablature or a five-line tablature candidate and the detector and classifier
-on a page with tablature. On an Apple M-series laptop with WebGPU a page takes 7 to
+on a page with tablature and no `textLayer`. On an Apple M-series laptop with WebGPU a page takes 7 to
 9 seconds once the models are cached, of which the OCR is about 3 seconds
 (about 5 on WebAssembly threads); `readTextStrips` alone takes about 2.5
 seconds. Under Node on one WebAssembly thread a page takes about 55 seconds,
@@ -199,8 +304,9 @@ Options of `createRecognizer`: `baseUrl` (required), `prefer` (the best
 backend to try, default `"webgpu"`), `wasmPaths` (where onnxruntime-web's
 `.wasm` and `.mjs` files are served, when your bundler does not place them
 itself), and `createWorker` (see below). Options of `recognizePage`:
-`onProgress`, `signal`, `ocr` (default `true`) and `minTextScore` (default
-`0.5`); `readTextStrips` takes the same less `ocr`.
+`onProgress`, `signal`, `ocr` (default `true`), `minTextScore` (default
+`0.5`) and `textLayer`; `readTextStrips` takes the same less `ocr` and
+`textLayer`.
 
 ### Bundlers
 
