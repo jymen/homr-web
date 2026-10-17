@@ -668,16 +668,16 @@ function continuesPast(
   return true;
 }
 
-/** A piece grown back over the cut rows it touches, which may have shaved a fret's top or bottom row. */
+/**
+ * A piece grown back by the one cut row next to it on each side it touches:
+ * that row may have shaved the fret's top or bottom, while the row beyond
+ * belongs to what the cut parted it from (the fret stacked over it, whose
+ * sliver in a crop reads a 0 as "ō").
+ */
 function grownOverCuts(box: Box, cut: Uint8Array): Box {
-  let top = box.y;
-  while (top > 0 && cut[top - 1] === 1) {
-    top -= 1;
-  }
-  let bottom = box.y + box.h;
-  while (bottom < cut.length && cut[bottom] === 1) {
-    bottom += 1;
-  }
+  const top = box.y > 0 && cut[box.y - 1] === 1 ? box.y - 1 : box.y;
+  const end = box.y + box.h;
+  const bottom = end < cut.length && cut[end] === 1 ? end + 1 : end;
   return { ...box, h: bottom - top, y: top };
 }
 
