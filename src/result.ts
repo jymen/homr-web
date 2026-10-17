@@ -13,10 +13,21 @@ export type {
   TabAnnotation,
   TabEvent,
   TabNote,
+  TabPlacedEvent,
   TabReading,
+  TabSlur,
+  TabSlurKind,
   TabTechnique,
+  TabTimeSignature,
 } from "./tab/read.js";
-export type { TabCapo, TabTuning, TuningSource } from "./tab/tuning.js";
+export type { TabBarline, TabStem } from "./tab/rhythm.js";
+export type {
+  TabCapo,
+  TabInstrumentKind,
+  TabInstrumentName,
+  TabTuning,
+  TuningSource,
+} from "./tab/tuning.js";
 
 export const BACKENDS = ["webgpu", "wasm-threads", "wasm"] as const;
 /** Chosen once per Worker by startRuntime and frozen before the first session. */

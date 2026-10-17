@@ -100,6 +100,7 @@ export const startBrowserEngine: StartEngine = async (settings, onModel) => {
               ...options,
               minTextScore,
               ocr: task.ocr,
+              textLayer: task.textLayer,
             })
           : await recognizeTexts(image, task.staves, engine, {
               ...options,

@@ -12,7 +12,7 @@
  */
 
 import type { TabLineCount } from "./detect.js";
-import type { TabEvent, TabNote, TabReading } from "./read.js";
+import type { TabNote, TabPlacedEvent, TabReading } from "./read.js";
 import { midiOfPitch, standardStrings } from "./tuning.js";
 
 /** `strings` are MIDI numbers of the open strings, top tab line first; `capo` is a fret, 0 for none. */
@@ -62,8 +62,10 @@ export const standardTuning = (lines: TabLineCount): Tuning => ({
  * that fits was read.
  */
 export function pitchTab(
-  reading: Pick<TabReading, "events" | "lines"> &
-    Partial<Pick<TabReading, "capo" | "tuning">>,
+  reading: {
+    readonly events: readonly TabPlacedEvent[];
+    readonly lines: TabReading["lines"];
+  } & Partial<Pick<TabReading, "capo" | "tuning">>,
   tuning: Tuning | undefined = tuningOf(reading)
 ): PitchedEvent[] {
   if (tuning === undefined) {
@@ -84,7 +86,7 @@ export function pitchTab(
     midi: (tuning.strings[note.string - 1] as number) + tuning.capo + note.fret,
   });
   return reading.events.map(
-    (event: TabEvent): PitchedEvent => ({
+    (event: TabPlacedEvent): PitchedEvent => ({
       notes: event.notes.map(pitch) as [PitchedNote, ...PitchedNote[]],
       x: event.x,
     })

@@ -111,13 +111,25 @@ describeWithModels("readTabText on typeset tab pages", () => {
     );
   }
 
+  /** Each fret page's title names its instrument ("homr-web tab fixture: banjo, 5 lines"). */
+  const INSTRUMENT_OF_FILE: Readonly<Record<string, string>> = {
+    "banjo-5-lines.png": "banjo5",
+    "guitar-6-lines.png": "guitar",
+    "mandolin-4-lines.png": "mandolin",
+  };
+
   for (const { file } of truth.pages) {
     it(
-      `${file}: no tuning and no capo printed, none read`,
+      `${file}: no tuning and no capo printed, none read; the instrument its title names`,
       async () => {
         const { tabs, texts } = await textsOf(file);
         expect(tabs.length).toBeGreaterThan(0);
-        expect(texts).toEqual(tabs.map(() => ({})));
+        expect(texts.map(({ instrumentName, ...rest }) => rest)).toEqual(
+          tabs.map(() => ({}))
+        );
+        expect(texts.map((t) => t.instrumentName?.kind)).toEqual(
+          tabs.map(() => INSTRUMENT_OF_FILE[file])
+        );
       },
       PAGE_TIMEOUT_MS
     );

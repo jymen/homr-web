@@ -50,6 +50,7 @@
     "@biomejs/biome": "2.5.14",
     "@types/node": "^22.0.0",
     "@types/pngjs": "^6.0.5",
+    "pdfjs-dist": "^5.7.284",
     "pngjs": "^7.0.0",
     "typescript": "^5.9.3",
     "ultracite": "^7.12.0",

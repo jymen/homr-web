@@ -474,3 +474,72 @@ export function resolveTuning(
 /** The standard tuning's open strings for a line count, top line first: mandolin GDAE, banjo gDGBD, guitar EADGBE. */
 export const standardStrings = (lines: TabLineCount): readonly string[] =>
   [...STANDARD[lines]].reverse();
+
+export const TAB_INSTRUMENT_KINDS = [
+  "banjo5",
+  "tenorBanjo",
+  "mandolin",
+  "guitar",
+] as const;
+/** The instruments a tab page is read for: five-string banjo, tenor banjo, mandolin, guitar. */
+export type TabInstrumentKind = (typeof TAB_INSTRUMENT_KINDS)[number];
+
+/** An instrument named in the page's text ("Clawhammer Banjo", "Mandolin"), with the line it was read from. */
+export interface TabInstrumentName {
+  readonly confidence: number;
+  readonly kind: TabInstrumentKind;
+  readonly text: string;
+}
+
+/**
+ * Words naming an instrument, first match wins. "Banjo" alone is the
+ * five-string banjo, as clawhammer and Scruggs books mean it; a tenor banjo is
+ * always called one.
+ */
+const INSTRUMENT_WORDS: readonly (readonly [RegExp, TabInstrumentKind])[] = [
+  [/\btenor\s+banjo\b|\bbanjo\s+tenor\b/, "tenorBanjo"],
+  [/\bbanjo\b|\bclawhammer\b|\bscruggs\b|\bfrailing\b/, "banjo5"],
+  [/\bmandolin[e]?\b/, "mandolin"],
+  [/\bguitar[e]?\b|\bguitarra\b/, "guitar"],
+];
+
+/** The instrument a line of page text names, if any. */
+export function instrumentNameOf(text: string): TabInstrumentKind | undefined {
+  const lower = normalised(text).toLowerCase();
+  return INSTRUMENT_WORDS.find(([pattern]) => pattern.test(lower))?.[1];
+}
+
+/** A tenor banjo's two usual tunings, top line first: Irish GDAE and CGDA. */
+const TENOR_TUNINGS: readonly (readonly string[])[] = [
+  ["E4", "A3", "D3", "G2"],
+  ["A4", "D4", "G3", "C3"],
+];
+
+/**
+ * The tunings to offer when the page names none, top line first, the
+ * standard one first: the registry's names for that string count, or for
+ * that instrument.
+ */
+export function tuningCandidates(
+  of: TabInstrumentKind | TabLineCount
+): (readonly string[])[] {
+  const named = (count: TabLineCount) =>
+    NAMED[count].flatMap((t) => {
+      const strings = pitched(lettersNotes(t.letters));
+      return strings === undefined ? [] : [strings];
+    });
+  switch (of) {
+    case "banjo5":
+      return named(5);
+    case "guitar":
+      return named(6);
+    case "mandolin":
+      return named(4);
+    case "tenorBanjo":
+      return [...TENOR_TUNINGS];
+    case 4:
+      return [...named(4), ...TENOR_TUNINGS];
+    default:
+      return named(of);
+  }
+}

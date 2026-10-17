@@ -36,6 +36,7 @@ import {
   type ReadCrops,
   whitenTablature,
 } from "../tab/detect.js";
+import { glyphsOf, linesIn, type PageTextItem } from "../tab/layer.js";
 import { readTablature, type TabReading } from "../tab/read.js";
 import { readTabText, type TabText } from "../tab/text.js";
 import { detectStaffsInImage } from "./detect.js";
@@ -62,6 +63,13 @@ export interface PipelineOptions {
   readonly onProgress?: (progress: Progress) => void;
   /** Checked between stages and before every decoder step. */
   readonly signal?: AbortSignal;
+  /**
+   * The page's own text when it comes from a born-digital PDF, as pdf.js
+   * gives it (src/tab/layer.ts). On a page with tablature it replaces the
+   * recogniser for the frets, letters, time signature and the tuning,
+   * capo and instrument text; empty or absent, the recogniser reads them.
+   */
+  readonly textLayer?: readonly PageTextItem[];
 }
 
 const NOT_MUSIC: ReadonlySet<string> = new Set(["no-noteheads", "no-staffs"]);
@@ -274,8 +282,17 @@ async function readTabTextOrNothing(
   page: ColorImage,
   tabs: readonly DetectedTab[],
   log: string[],
-  { signal }: PipelineOptions
+  { signal, textLayer = [] }: PipelineOptions
 ): Promise<readonly TabText[]> {
+  if (textLayer.length > 0) {
+    const glyphs = glyphsOf(textLayer, page.width, page.height);
+    return readTabText(
+      (_image, _score, _limit, region) =>
+        Promise.resolve(linesIn(glyphs, region)),
+      page,
+      tabs
+    );
+  }
   try {
     const ocr = await openOcr(engine, signal);
     signal?.throwIfAborted();
@@ -323,7 +340,14 @@ export async function recognizePage(
     const tabs: DetectedTab[] = await detectTablature(engine.cv, page, read);
     const reportTab = (done: number) =>
       options.onProgress?.({ done, stage: "tab", total: tabs.length + 1 });
-    tablature = await readTablature(engine.cv, page, tabs, read, reportTab);
+    tablature = await readTablature(
+      engine.cv,
+      page,
+      tabs,
+      read,
+      reportTab,
+      options.textLayer
+    );
     if (hasTabs(tablature)) {
       const texts = await readTabTextOrNothing(
         engine,

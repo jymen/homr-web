@@ -14,6 +14,7 @@ import {
   type RecognizeResult,
   type StaffBox,
 } from "./result.js";
+import type { PageTextItem } from "./tab/layer.js";
 import {
   type HostCommand,
   type HostEvent,
@@ -52,6 +53,15 @@ export interface TextOptions {
 export interface RecognizeOptions extends TextOptions {
   /** Read the chord strips and the title. Default true; false leaves `texts` empty and `work-title` blank, and never loads the OCR models but the recogniser, which the tab guard and reader need on a page with tablature or a five-line tablature candidate. */
   readonly ocr?: boolean;
+  /**
+   * The page's own text when the page comes from a born-digital PDF, from
+   * pdf.js's getTextContent in page-normalised coordinates (PageTextItem).
+   * On a page with tablature it is read in place of the recogniser for the
+   * frets, the letters, the time signature and the tuning, capo and
+   * instrument text, which is faster and, on the pages measured, never
+   * less accurate. Omit it for a scan or a photo.
+   */
+  readonly textLayer?: readonly PageTextItem[];
 }
 
 const DEFAULT_MIN_TEXT_SCORE = 0.5;
@@ -139,6 +149,7 @@ class WorkerRecognizer implements Recognizer {
       kind: "page",
       minTextScore: options.minTextScore ?? DEFAULT_MIN_TEXT_SCORE,
       ocr: options.ocr ?? true,
+      textLayer: options.textLayer ?? [],
     });
   }
 

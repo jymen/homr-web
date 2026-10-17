@@ -13,26 +13,43 @@ import { type ColorImage, slicePlane } from "../image/plane.js";
 import type { DetectionLimit, OcrLine } from "../ocr/rapid-ocr.js";
 import type { DetectedTab } from "./detect.js";
 import {
+  instrumentNameOf,
   type ParsedTuning,
   parseLetterLabels,
   parseTabText,
   resolveTuning,
   type TabCapo,
+  type TabInstrumentName,
   type TabTuning,
 } from "./tuning.js";
 
-/** What a system's text says; either may be absent, and nothing is ever filled in. */
+/** What a system's text says; any may be absent, and nothing is ever filled in. */
 export interface TabText {
   readonly capo?: TabCapo;
+  /** An instrument the page names anywhere it was read ("Clawhammer Banjo" in the header). */
+  readonly instrumentName?: TabInstrumentName;
   readonly tuning?: TabTuning;
 }
 
-/** Reads text lines off an image, boxes in the image's pixels: RapidOcr.read. */
+/**
+ * Reads text lines off a region of the page, boxes in the region's pixels:
+ * RapidOcr.read on the region's image, or the PDF's own text in it
+ * (src/tab/layer.ts, linesIn).
+ */
 export type ReadText = (
   image: ColorImage,
   minTextScore: number,
-  limit: DetectionLimit
+  limit: DetectionLimit,
+  region: TextRegion
 ) => Promise<OcrLine[]>;
+
+/** A region of the page, in page pixels. */
+export interface TextRegion {
+  readonly x0: number;
+  readonly x1: number;
+  readonly y0: number;
+  readonly y1: number;
+}
 
 /**
  * Detection with the long side brought down to 1280. RapidOCR's default
@@ -246,6 +263,29 @@ function capoFor(
     : { confidence: best.confidence, fret: best.fret, text: best.text };
 }
 
+/** What one line of text says: a tuning, a capo, an instrument, each at most once. */
+function saidBy(
+  line: OcrLine,
+  scope: Scope
+): {
+  readonly capos: CapoCandidate[];
+  readonly names: TabInstrumentName[];
+  readonly tunings: TuningCandidate[];
+} {
+  const kind = instrumentNameOf(line.text);
+  const said = parseTabText(line.text);
+  const base = { confidence: line.score, scope, text: line.text };
+  return {
+    capos: said.capo === undefined ? [] : [{ ...base, fret: said.capo }],
+    names:
+      kind === undefined
+        ? []
+        : [{ confidence: line.score, kind, text: line.text }],
+    tunings:
+      said.tuning === undefined ? [] : [{ ...base, parsed: said.tuning }],
+  };
+}
+
 /**
  * Each tab's tuning and capo as the page prints them, in the tabs' order.
  * One recogniser pass per region: the header, the line under the first
@@ -258,6 +298,7 @@ export async function readTabText(
 ): Promise<TabText[]> {
   const tunings: TuningCandidate[] = [];
   const capos: CapoCandidate[] = [];
+  const names: TabInstrumentName[] = [];
   for (const region of regionsOf(page, tabs)) {
     if (
       region.x1 - region.x0 < MIN_REGION ||
@@ -269,21 +310,14 @@ export async function readTabText(
     const lines = await read(
       slicePlane(page, region.x0, region.y0, region.x1, region.y1),
       MIN_SCORE,
-      LIMIT
+      LIMIT,
+      region
     );
     for (const line of lines) {
-      const said = parseTabText(line.text);
-      const base = {
-        confidence: line.score,
-        scope: region.scope,
-        text: line.text,
-      };
-      if (said.tuning !== undefined) {
-        tunings.push({ ...base, parsed: said.tuning });
-      }
-      if (said.capo !== undefined) {
-        capos.push({ ...base, fret: said.capo });
-      }
+      const said = saidBy(line, region.scope);
+      tunings.push(...said.tunings);
+      capos.push(...said.capos);
+      names.push(...said.names);
     }
     const tab = region.scope === "page" ? undefined : tabs[region.scope];
     const labels =
@@ -292,11 +326,13 @@ export async function readTabText(
       tunings.push(labels);
     }
   }
+  const [instrumentName] = names.sort((a, b) => b.confidence - a.confidence);
   return tabs.map((tab, index) => {
     const tuning = tuningFor(tunings, index, tab);
     const capo = capoFor(capos, index);
     return {
       ...(capo === undefined ? {} : { capo }),
+      ...(instrumentName === undefined ? {} : { instrumentName }),
       ...(tuning === undefined ? {} : { tuning }),
     };
   });

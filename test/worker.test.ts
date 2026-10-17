@@ -23,7 +23,12 @@ interface Read {
   readonly task: PageTask;
 }
 
-const PAGE_TASK: PageTask = { kind: "page", minTextScore: 0.5, ocr: true };
+const PAGE_TASK: PageTask = {
+  kind: "page",
+  minTextScore: 0.5,
+  ocr: true,
+  textLayer: [],
+};
 
 const success = (log: string): RecognizeResult => ({
   backend: "wasm",
@@ -158,17 +163,24 @@ describe("recognizePage", () => {
     expect(h.reads[0]?.task).toEqual(PAGE_TASK);
     h.reads[0]?.finish(success("read"));
     await pending;
+    const layer = [{ text: "0", x0: 0.1, x1: 0.11, y0: 0.19, y1: 0.2 }];
+    const withLayer = recognizer.recognizePage(page(), { textLayer: layer });
+    await tick();
+    expect(h.reads[1]?.task).toEqual({ ...PAGE_TASK, textLayer: layer });
+    h.reads[1]?.finish(success("read"));
+    await withLayer;
     const second = recognizer.recognizePage(page(), {
       minTextScore: 0.6,
       ocr: false,
     });
     await tick();
-    expect(h.reads[1]?.task).toEqual({
+    expect(h.reads[2]?.task).toEqual({
       kind: "page",
       minTextScore: 0.6,
       ocr: false,
+      textLayer: [],
     });
-    h.reads[1]?.finish(success("read"));
+    h.reads[2]?.finish(success("read"));
     await second;
   });
 
@@ -363,6 +375,12 @@ describe("WorkerHost", () => {
       page: page(),
       task: { kind: "texts", minTextScore: 0.5, staves: [{ cx: 1 }] },
     });
+    host.handle({
+      id: 6,
+      kind: "recognize",
+      page: page(),
+      task: { ...PAGE_TASK, textLayer: [{ text: "0", x0: 0.1 }] },
+    });
     await tick();
     expect(events).toEqual([
       {
@@ -376,6 +394,12 @@ describe("WorkerHost", () => {
         kind: "error",
         message:
           "a homr-web worker cannot serve a recognize whose page is not a Blob, ImageBitmap or ImageData",
+      },
+      {
+        id: null,
+        kind: "error",
+        message:
+          "a homr-web worker cannot serve a recognize whose task is not a page or a texts task",
       },
       {
         id: null,

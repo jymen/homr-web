@@ -11,6 +11,7 @@ import {
   type RecognizeResult,
   type StaffBox,
 } from "./result.js";
+import type { PageTextItem } from "./tab/layer.js";
 
 export type PageInput = Blob | ImageBitmap | ImageData;
 
@@ -27,6 +28,7 @@ export type PageTask =
       readonly kind: "page";
       readonly minTextScore: number;
       readonly ocr: boolean;
+      readonly textLayer: readonly PageTextItem[];
     }
   | {
       readonly kind: "texts";
@@ -132,14 +134,39 @@ function parseStaffBox(value: unknown): StaffBox | undefined {
     : undefined;
 }
 
+/** A text layer item as PageTextItem says, every number finite; absent is no layer. */
+function parseTextLayer(value: unknown): PageTextItem[] | undefined {
+  if (value === undefined) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    return;
+  }
+  const items = value.flatMap((item: unknown): PageTextItem[] => {
+    if (!isRecord(item)) {
+      return [];
+    }
+    const { text, x0, x1, y0, y1 } = item;
+    return typeof text === "string" &&
+      isFiniteNumber(x0) &&
+      isFiniteNumber(x1) &&
+      isFiniteNumber(y0) &&
+      isFiniteNumber(y1)
+      ? [{ text, x0, x1, y0, y1 }]
+      : [];
+  });
+  return items.length === value.length ? items : undefined;
+}
+
 function parseTask(value: unknown): PageTask | undefined {
   if (!(isRecord(value) && isFiniteNumber(value.minTextScore))) {
     return undefined;
   }
   const { kind, minTextScore } = value;
   if (kind === "page") {
-    return typeof value.ocr === "boolean"
-      ? { kind, minTextScore, ocr: value.ocr }
+    const textLayer = parseTextLayer(value.textLayer);
+    return typeof value.ocr === "boolean" && textLayer !== undefined
+      ? { kind, minTextScore, ocr: value.ocr, textLayer }
       : undefined;
   }
   if (kind !== "texts" || !Array.isArray(value.staves)) {
