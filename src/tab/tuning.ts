@@ -237,6 +237,21 @@ function compactNotes(token: string): Note[] | undefined {
   );
 }
 
+const SHORT_STRING = /^[A-Ga-g](?:#|b)?$/;
+const LONG_STRINGS = /^(?:[A-G](?:#|b)?){4}$/;
+
+/**
+ * A banjo's short string printed apart from the four long ones: Peghead
+ * Nation's "Tuning: G DGBD" is gDGBD, not a four-string DGBD.
+ */
+const splitFifth = (
+  token: string,
+  next: string | undefined
+): Note[] | undefined =>
+  next !== undefined && SHORT_STRING.test(token) && LONG_STRINGS.test(next)
+    ? compactNotes(`${token}${next}`)
+    : undefined;
+
 /** One note name standing alone: a letter, or a solfège syllable when `solfege` (French books write "Ré La Ré Sol La Ré"). */
 function noteOfToken(token: string, solfege: boolean): Note | undefined {
   const letter = token.match(SINGLE_NOTE);
@@ -315,6 +330,12 @@ export function parseTabText(text: string): ParsedText {
 function tuningOf(line: string, lower: string): ParsedTuning | undefined {
   const keyword = TUNING_WORD.test(lower);
   const tokens = line.split(TOKEN_GAP).filter((t) => t !== "");
+  for (const [k, token] of tokens.entries()) {
+    const split = splitFifth(token, tokens[k + 1]);
+    if (split !== undefined) {
+      return { form: "letters", notes: split };
+    }
+  }
   for (const token of tokens) {
     const notes = compactNotes(token);
     if (notes !== undefined) {

@@ -37,6 +37,8 @@ describe("parseTabText: tunings", () => {
     ["aEAC#E tuning, Brainjo level 3", 5, ["E4", "C#4", "A3", "E3", "A4"]],
     ["gDGBD", 5, BANJO_G],
     ["GDGBD", 5, BANJO_G],
+    ["Tuning: G DGBD", 5, BANJO_G],
+    ["Tuning: g CGCD", 5, ["D4", "C4", "G3", "C3", "G4"]],
     ["gCGCD", 5, ["D4", "C4", "G3", "C3", "G4"]],
     ["f#DF#AD", 5, ["D4", "A3", "F#3", "D3", "F#4"]],
     ["gDGBbD", 5, ["D4", "Bb3", "G3", "D3", "G4"]],
