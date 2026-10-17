@@ -9,8 +9,10 @@
  * mandolin PDFs by the prototype (.scratch/tab-sketch/pages.ts, 2026-10-08),
  * the three guitar PDFs for this guard (seven pages; the Borus March file has
  * no extension and is read as a PDF all the same), and two Guitar Pro score
- * and tab exports whose staves the guard once took for tabs (2026-10-10).
- * 63 tab systems over 17 pages.
+ * and tab exports whose staves the guard once took for tabs (2026-10-10),
+ * and four Peghead Nation clawhammer pages whose frets hang their stems and
+ * whose beams lie against the bottom line (2026-10-17). 79 tab systems over
+ * 21 pages.
  */
 
 import { execFileSync } from "node:child_process";
@@ -100,6 +102,16 @@ const SAMPLES: readonly Sample[] = [
     tabs: 5,
   },
   { file: "guitar/DADGADTab-Brian-Borus-March", lines: 6, staves: 4, tabs: 4 },
+  { file: "banjo/ClawCottonEyedJoe.pdf", lines: 5, staves: 0, tabs: 2 },
+  { file: "banjo/ClawBanjoBillyLowground.pdf", lines: 5, staves: 0, tabs: 6 },
+  {
+    file: "banjo/ClawBanjoBillyLowground.pdf",
+    lines: 5,
+    page: 2,
+    staves: 0,
+    tabs: 2,
+  },
+  { file: "banjo/ClawBjoCluckOldHen.pdf", lines: 5, staves: 0, tabs: 6 },
 ];
 
 const nameOf = (sample: Sample) => `${sample.file} p${sample.page ?? 1}`;
@@ -150,7 +162,7 @@ const localSuite = (title: string, suite: () => void) =>
 
 localSuite("the tab guard on the local tablature samples", () => {
   it(
-    "finds every tab system of the seventeen pages, 63 in all, with its line count",
+    "finds every tab system of the twenty-one pages, 79 in all, with its line count",
     async () => {
       const cv = await testOpenCv();
       const store = await storeOn(CPU);

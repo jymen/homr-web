@@ -65,6 +65,13 @@ export interface Box {
   readonly y: number;
 }
 
+/** Page rows `top` onwards over a line group's columns, `rows` of them, 1 for ink. */
+export interface Band {
+  readonly data: Uint8Array;
+  readonly rows: number;
+  readonly top: number;
+}
+
 /** A line-sitting mark, in page pixels, `line` 0-based from the top. */
 export interface Mark extends Box {
   readonly line: number;
@@ -87,14 +94,29 @@ interface Candidate {
 export type ReadCrops = (crops: readonly ColorImage[]) => Promise<string[]>;
 
 const TAB = {
+  /** Rows of a line touched by a beam: those covered at least this share of the most covered row, the others at most `besideLineShare`. */
+  besideLineShare: 0.25,
   /** Crop padding, in line spacings. */
   cropPad: 0.25,
+  /** The outer cuts lie this far outside the outer lines, in line spacings (see cutBetweenLines). */
+  cutOutside: 0.5,
+  /** What a cut leaves at one end narrower than this, in line spacings, is a piece of stem. */
+  cutPieceWidth: 0.2,
   gapTolerance: 0.2,
+  /** hangsAStem: at least this tall, the head at least this tall, and this share of the rows below it a stem's width. */
+  /** The stem hangs within this share of the head's width from its middle. */
+  hangingCentred: 0.2,
+  hangingHead: 0.5,
+  hangingHeight: 1.5,
+  /** The head is looked for in this many spacings from the top. */
+  hangingReach: 1.3,
+  hangingThinShare: 0.8,
   /**
    * A mark is knocked out when its line is blank within this many line
    * spacings on both sides of it ("—10—"), as tab software prints a fret.
    */
   knockOutReach: 0.15,
+  lineCoverShare: 0.5,
   /** The band read for marks, in line spacings above the top line and below the bottom one. */
   markBand: 0.75,
   /**
@@ -105,6 +127,8 @@ const TAB = {
   maxBreak: 5,
   maxFret: 24,
   maxGapShare: 0.03,
+  /** At most this many lines of a group may be hidden by beams (finishGroup). */
+  maxHidden: 2,
   maxMarkHeight: 1.15,
   maxMarkWidth: 1,
   /** A line is at most this many rows thick: max(4, width / 400). */
@@ -117,6 +141,8 @@ const TAB = {
   minDigits: 4,
   /** Consecutive line gaps: at least 5 px, at most 3% of the page height, within 20% of the first. */
   minGap: 5,
+  /** Frets hanging their stems on a system for it to be cut between the lines. */
+  minHanging: 2,
   /**
    * The share of a group's marks knocked out for it to count as printed that
    * way: tabs measure 0.81 to 1.00 where their program knocks out, staves
@@ -146,6 +172,11 @@ const TAB = {
    */
   sameSizeTolerance: 0.2,
   sampleSize: 12,
+  /** A cut piece with this share of its box inked is a piece of a thick bar. */
+  solidShare: 0.8,
+  /** A piece narrower than this, in line spacings, whose ink carries on past both its cuts for `strokeReach` is a stroke of a larger glyph. */
+  strokeReach: 0.3,
+  strokeWidth: 0.4,
   thicknessShare: 1 / 400,
 } as const;
 
@@ -228,15 +259,85 @@ function longestBreak(
   return longest;
 }
 
-/** Rows covered by long horizontal runs, clustered into thin lines. */
-function findLines(ink: Uint8Array, width: number, height: number): PageLine[] {
+/**
+ * The rows of a run of covered rows that make the line: all of them, or,
+ * when a beam lies against the line (Peghead Nation beams a fifth-string
+ * note just under the bottom line), the rows covered at least half as much
+ * as the most covered one, when they are contiguous and every other row is
+ * covered a quarter as much at most. A beam is a few spacings long, the
+ * line the system's width; a scanned line fading over its edge rows is not
+ * split.
+ */
+function lineRows(
+  cover: Uint32Array,
+  start: number,
+  end: number
+): { readonly end: number; readonly start: number } | undefined {
+  let most = 0;
+  for (let row = start; row < end; row += 1) {
+    most = Math.max(most, cover[row] ?? 0);
+  }
+  const strong = (row: number) =>
+    (cover[row] ?? 0) >= TAB.lineCoverShare * most;
+  let first = start;
+  while (first < end && !strong(first)) {
+    first += 1;
+  }
+  let last = first;
+  while (last < end && strong(last)) {
+    last += 1;
+  }
+  for (let row = start; row < end; row += 1) {
+    const inside = row >= first && row < last;
+    if (
+      !inside &&
+      (strong(row) || (cover[row] ?? 0) > TAB.besideLineShare * most)
+    ) {
+      return;
+    }
+  }
+  return { end: last, start: first };
+}
+
+/**
+ * Rows covered by long horizontal runs, clustered into thin lines. A cluster
+ * too thick for a line whose core rows are one (a beam lying against it) is
+ * kept apart as `hidden`: groupLines takes it only to finish a group.
+ */
+function findLines(
+  ink: Uint8Array,
+  width: number,
+  height: number
+): { readonly hidden: PageLine[]; readonly lines: PageLine[] } {
   const { cover, rowX0, rowX1 } = rowCover(ink, width, height);
   const minCover = width * TAB.minRowCover;
   const maxThick = Math.max(
     TAB.maxThickness,
     Math.round(width * TAB.thicknessShare)
   );
+  const lineOf = (start: number, end: number): PageLine => {
+    let weight = 0;
+    let sumY = 0;
+    let x0 = width;
+    let x1 = -1;
+    for (let row = start; row < end; row += 1) {
+      const covered = cover[row] ?? 0;
+      weight += covered;
+      sumY += row * covered;
+      x0 = Math.min(x0, rowX0[row] ?? width);
+      x1 = Math.max(x1, rowX1[row] ?? -1);
+    }
+    return {
+      breakLength: longestBreak(ink, width, start, end - 1, x0, x1),
+      x0,
+      x1,
+      y: sumY / weight,
+      y0: start,
+      y1: end - 1,
+    };
+  };
   const lines: PageLine[] = [];
+  const hidden: PageLine[] = [];
   let y = 0;
   while (y < height) {
     if ((cover[y] ?? 0) < minCover) {
@@ -244,36 +345,70 @@ function findLines(ink: Uint8Array, width: number, height: number): PageLine[] {
       continue;
     }
     let end = y;
-    let weight = 0;
-    let sumY = 0;
-    let x0 = width;
-    let x1 = -1;
     while (end < height && (cover[end] ?? 0) >= minCover) {
-      const covered = cover[end] ?? 0;
-      weight += covered;
-      sumY += end * covered;
-      x0 = Math.min(x0, rowX0[end] ?? width);
-      x1 = Math.max(x1, rowX1[end] ?? -1);
       end += 1;
     }
     if (end - y <= maxThick) {
-      lines.push({
-        breakLength: longestBreak(ink, width, y, end - 1, x0, x1),
-        x0,
-        x1,
-        y: sumY / weight,
-        y0: y,
-        y1: end - 1,
-      });
+      lines.push(lineOf(y, end));
+    } else {
+      const core = lineRows(cover, y, end);
+      if (core !== undefined && core.end - core.start <= maxThick) {
+        hidden.push(lineOf(core.start, core.end));
+      }
     }
     y = end;
   }
-  return lines;
+  return { hidden, lines };
+}
+
+/**
+ * A group of three or four lines made five with the hidden lines a gap
+ * below its last line or above its first, two at most, or left as it was: Peghead Nation beams notes
+ * against a banjo tab's lines (a fifth-string note just under the bottom
+ * line, low notes between the top ones), which thickens those lines out of
+ * the line rows. Only five lines are taken: a staff missing lines to beams
+ * is completed the same way and then fails the digit test, while four would
+ * pass for a tab by their count alone.
+ */
+function finishGroup(
+  group: PageLine[],
+  hidden: readonly PageLine[],
+  gap: number
+): void {
+  const first = group[0] as PageLine;
+  const fits = (line: PageLine, y: number) =>
+    Math.abs(line.y - y) <= gap * TAB.gapTolerance &&
+    Math.min(line.x1, first.x1) - Math.max(line.x0, first.x0) >=
+      TAB.minOverlap * Math.max(line.x1 - line.x0, first.x1 - first.x0) &&
+    line.breakLength <= TAB.maxBreak * gap;
+  const finished = [...group];
+  for (
+    let added = 0;
+    added < TAB.maxHidden && finished.length < 5;
+    added += 1
+  ) {
+    const below = hidden.find((line) =>
+      fits(line, (finished.at(-1) as PageLine).y + gap)
+    );
+    const above = hidden.find((line) =>
+      fits(line, (finished[0] as PageLine).y - gap)
+    );
+    if (below !== undefined) {
+      finished.push(below);
+    } else if (above === undefined) {
+      break;
+    } else {
+      finished.unshift(above);
+    }
+  }
+  if (finished.length === 5) {
+    group.splice(0, group.length, ...finished);
+  }
 }
 
 /** Runs of 4 to 6 evenly spaced lines of about one extent; longer runs are not systems. */
 function groupLines(
-  lines: readonly PageLine[],
+  { hidden, lines }: ReturnType<typeof findLines>,
   pageHeight: number
 ): LineGroup[] {
   const groups: LineGroup[] = [];
@@ -305,10 +440,15 @@ function groupLines(
       }
       group.push(line);
     }
+    if (group.length === 3 || group.length === 4) {
+      finishGroup(group, hidden, gap);
+    }
     if (group.length >= 4 && group.length <= 6) {
       groups.push({
         lines: group,
-        spacing: ((group.at(-1) as PageLine).y - first.y) / (group.length - 1),
+        spacing:
+          ((group.at(-1) as PageLine).y - (group[0] as PageLine).y) /
+          (group.length - 1),
         x0: Math.min(...group.map((l) => l.x0)),
         x1: Math.max(...group.map((l) => l.x1)),
       });
@@ -321,11 +461,16 @@ function groupLines(
 }
 
 /** The band of a group that carries its marks, in page rows. */
-function bandOf(group: LineGroup, height: number, margin: number) {
+function bandOf(
+  group: LineGroup,
+  height: number,
+  margin: number,
+  below = margin
+) {
   const top = (group.lines[0] as PageLine).y;
   const bottom = (group.lines.at(-1) as PageLine).y;
   return {
-    bottom: Math.min(height - 1, Math.ceil(bottom + margin * group.spacing)),
+    bottom: Math.min(height - 1, Math.ceil(bottom + below * group.spacing)),
     top: Math.max(0, Math.floor(top - margin * group.spacing)),
   };
 }
@@ -342,9 +487,13 @@ export function bandWithoutLines(
   ink: Uint8Array,
   width: number,
   height: number,
-  group: LineGroup
-): { readonly data: Uint8Array; readonly rows: number; readonly top: number } {
-  const { bottom, top } = bandOf(group, height, TAB.markBand);
+  group: LineGroup,
+  reach: { readonly above: number; readonly below: number } = {
+    above: TAB.markBand,
+    below: TAB.markBand,
+  }
+): Band {
+  const { bottom, top } = bandOf(group, height, reach.above, reach.below);
   const cols = group.x1 - group.x0 + 1;
   const rows = bottom - top + 1;
   const data = new Uint8Array(cols * rows);
@@ -404,13 +553,13 @@ function ruledColumns(
   return ruled;
 }
 
-/** Connected components' boxes of a 0/1 band, 4-connected as the prototype's flood fill. */
-function componentBoxes(
+/** Connected components of a 0/1 band, 4-connected as the prototype's flood fill: boxes, and each pixel's label (box k is label k + 1). */
+function componentsOf(
   cv: OpenCv,
   band: Uint8Array,
   cols: number,
   rows: number
-): Box[] {
+): { readonly boxes: Box[]; readonly labels: Int32Array } {
   return withMatScope((scope) => {
     const mat = scope.keep(new cv.Mat(rows, cols, cv.CV_8UC1));
     mat.data.set(band);
@@ -435,8 +584,216 @@ function componentBoxes(
         y: s[k * 5 + 1] ?? 0,
       });
     }
-    return boxes;
+    return { boxes, labels: new Int32Array(labels.data32S) };
   });
+}
+
+/** Connected components' boxes of a 0/1 band, 4-connected. */
+export const componentBoxes = (
+  cv: OpenCv,
+  band: Uint8Array,
+  cols: number,
+  rows: number
+): Box[] => componentsOf(cv, band, cols, rows).boxes;
+
+/**
+ * Rows blanked half way between the lines and half a spacing outside the
+ * outer ones, in place; 1 for a cut row. A fret is centred on its line and no
+ * taller than a spacing, so the cuts pass between frets: they part numbers
+ * stacked in a chord that touch once the line is erased, a number from the
+ * stem hung on its own ink (Peghead Nation), and a number from a slur arc
+ * resting on it. What a cut leaves of a stem, a barline or a large glyph
+ * reaches a cut at both ends, or is a stem's width at one.
+ */
+function cutBetweenLines(
+  band: Band,
+  cols: number,
+  group: LineGroup
+): Uint8Array {
+  const cut = new Uint8Array(band.rows);
+  const first = (group.lines[0] as PageLine).y;
+  const last = (group.lines.at(-1) as PageLine).y;
+  const at = [
+    first - TAB.cutOutside * group.spacing,
+    ...group.lines
+      .slice(1)
+      .map((line, k) => (line.y + (group.lines[k] as PageLine).y) / 2),
+    last + TAB.cutOutside * group.spacing,
+  ];
+  for (const y of at) {
+    for (const row of new Set([
+      Math.floor(y - band.top),
+      Math.ceil(y - band.top),
+    ])) {
+      if (row >= 0 && row < band.rows) {
+        cut[row] = 1;
+        band.data.fill(0, row * cols, (row + 1) * cols);
+      }
+    }
+  }
+  return cut;
+}
+
+/**
+ * Whether the ink of `box`'s columns carries on across the cut at its top
+ * (`direction` -1) or bottom (1) for 0.3 spacing in every row: the stroke
+ * of something taller than a fret, such as the stem of the "T" in a TAB clef.
+ * A fret stacked on another meets that one's curve and then its hole.
+ */
+function continuesPast(
+  whole: Uint8Array,
+  cols: number,
+  cut: Uint8Array,
+  box: Box,
+  direction: -1 | 1,
+  spacing: number
+): boolean {
+  let row = direction < 0 ? box.y - 1 : box.y + box.h;
+  while (row >= 0 && row < cut.length && cut[row] === 1) {
+    row += direction;
+  }
+  for (let k = 0; k < Math.round(TAB.strokeReach * spacing); k += 1) {
+    const y = row + direction * k;
+    if (y < 0 || y >= cut.length) {
+      return false;
+    }
+    let inked = false;
+    for (let c = 0; c < box.w && !inked; c += 1) {
+      inked = whole[y * cols + box.x + c] === 1;
+    }
+    if (!inked) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/** A piece grown back over the cut rows it touches, which may have shaved a fret's top or bottom row. */
+function grownOverCuts(box: Box, cut: Uint8Array): Box {
+  let top = box.y;
+  while (top > 0 && cut[top - 1] === 1) {
+    top -= 1;
+  }
+  let bottom = box.y + box.h;
+  while (bottom < cut.length && cut[bottom] === 1) {
+    bottom += 1;
+  }
+  return { ...box, h: bottom - top, y: top };
+}
+
+/**
+ * Whether a component is a fret with its stem hung from its own ink
+ * (Peghead Nation): at least 1.5 spacings tall and no wider than a fret,
+ * with a head of a fret's height (0.5 to 1.15 spacings) above rows that are
+ * a stem's width all the way down (80% of them), hung from the head's
+ * middle. A staff's note hangs its stem from the head's left edge; a "T" of
+ * a TAB clef has a head as thin as its bar.
+ */
+function hangsAStem(band: Band, cols: number, box: Box, s: number): boolean {
+  if (box.h < TAB.hangingHeight * s || box.w > TAB.maxMarkWidth * s) {
+    return false;
+  }
+  const thin = (y: number) => {
+    let inked = 0;
+    for (let c = 0; c < box.w; c += 1) {
+      inked += band.data[y * cols + box.x + c] ?? 0;
+    }
+    return inked <= TAB.cutPieceWidth * s;
+  };
+  let head = 0;
+  for (let y = 0; y < Math.min(box.h, TAB.hangingReach * s); y += 1) {
+    head = thin(box.y + y) ? head : y + 1;
+  }
+  if (head < TAB.hangingHead * s || head > TAB.maxMarkHeight * s) {
+    return false;
+  }
+  let stem = 0;
+  let sumX = 0;
+  let inked = 0;
+  for (let y = box.y + head; y < box.y + box.h; y += 1) {
+    stem += thin(y) ? 1 : 0;
+    for (let c = 0; c < box.w; c += 1) {
+      if (band.data[y * cols + box.x + c] === 1) {
+        sumX += c;
+        inked += 1;
+      }
+    }
+  }
+  return (
+    stem >= TAB.hangingThinShare * (box.h - head) &&
+    Math.abs(sumX / Math.max(1, inked) - box.w / 2) <=
+      TAB.hangingCentred * box.w
+  );
+}
+
+/**
+ * The band's components of a fret's size. On a system whose frets hang
+ * their stems (at least two do), the components too big to be a fret are
+ * cut between the lines (cutBetweenLines) and their pieces grown back over
+ * the cuts; the rest stand as they are, and so does every component of a
+ * system that hangs no stems (docs/design/tab-4-findings.md).
+ */
+function fretSized(
+  cv: OpenCv,
+  band: Band,
+  cols: number,
+  group: LineGroup
+): Box[] {
+  const s = group.spacing;
+  const sized = (box: Box) =>
+    box.h >= TAB.minMarkHeight * s &&
+    box.h <= TAB.maxMarkHeight * s &&
+    box.w >= Math.max(2, TAB.minMarkWidth * s) &&
+    box.w <= TAB.maxMarkWidth * s;
+  const { boxes, labels } = componentsOf(cv, band.data, cols, band.rows);
+  if (
+    boxes.filter((box) => hangsAStem(band, cols, box, s)).length <
+    TAB.minHanging
+  ) {
+    return boxes.filter(sized);
+  }
+  const big = new Set(
+    boxes.flatMap((box, k) =>
+      box.h > TAB.maxMarkHeight * s || box.w > TAB.maxMarkWidth * s
+        ? [k + 1]
+        : []
+    )
+  );
+  const whole = band.data.map((_, i) => (big.has(labels[i] ?? 0) ? 1 : 0));
+  const cutBand = { ...band, data: whole.slice() };
+  const cut = cutBetweenLines(cutBand, cols, group);
+  const pieces = componentBoxes(cv, cutBand.data, cols, cutBand.rows).flatMap(
+    (piece) => {
+      const above = piece.y === 0 || cut[piece.y - 1] === 1;
+      const below =
+        piece.y + piece.h >= cutBand.rows || cut[piece.y + piece.h] === 1;
+      const stroke =
+        above &&
+        below &&
+        piece.w < TAB.strokeWidth * s &&
+        continuesPast(whole, cols, cut, piece, -1, s) &&
+        continuesPast(whole, cols, cut, piece, 1, s);
+      const box = grownOverCuts(piece, cut);
+      return ((above || below) && piece.w < TAB.cutPieceWidth * s) ||
+        stroke ||
+        solid(whole, cols, box) ||
+        !sized(box)
+        ? []
+        : [box];
+    }
+  );
+  return [...boxes.filter(sized), ...pieces];
+}
+
+/** Whether `box` is nearly all ink: a piece of a thick barline, never a digit. */
+function solid(ink: Uint8Array, cols: number, box: Box): boolean {
+  let inked = 0;
+  for (let y = 0; y < box.h; y += 1) {
+    for (let c = 0; c < box.w; c += 1) {
+      inked += ink[(box.y + y) * cols + box.x + c] ?? 0;
+    }
+  }
+  return inked >= TAB.solidShare * box.w * box.h;
 }
 
 /**
@@ -455,15 +812,7 @@ export function marksOf(
   const band = bandWithoutLines(ink, width, height, group);
   const cols = group.x1 - group.x0 + 1;
   const onLines: Mark[] = [];
-  for (const box of componentBoxes(cv, band.data, cols, band.rows)) {
-    if (
-      box.h < TAB.minMarkHeight * s ||
-      box.h > TAB.maxMarkHeight * s ||
-      box.w < Math.max(2, TAB.minMarkWidth * s) ||
-      box.w > TAB.maxMarkWidth * s
-    ) {
-      continue;
-    }
+  for (const box of fretSized(cv, band, cols, group)) {
     const y = box.y + band.top;
     const centre = y + box.h / 2;
     let line = 0;
