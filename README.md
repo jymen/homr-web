@@ -450,11 +450,10 @@ the homr release it ports, e.g. `v0.5.0+homr0.7.0`. Set the new version in
 
 ```bash
 npm run check && npm run lint && npm test
-npm run build              # only dist/ is published, and nothing builds it for you
-npm pack --dry-run         # dist, LICENSE, NOTICE and README, nothing else
+npm run build && npm pack --dry-run   # dist, LICENSE, NOTICE and README, nothing else
 git tag v0.5.0+homr0.7.0
 git push origin main --tags
-npm publish                # npm opens the browser for the passkey
+npm publish                # rebuilds dist/, refuses sync-conflict copies, then asks for the passkey
 npm view homr-web version  # the new version
 ```
 
