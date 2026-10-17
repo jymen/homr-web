@@ -442,6 +442,26 @@ anyone porting the next homr release. It is outside semver. The design
 records are under `docs/design/`, and `docs/decisions.tsv` holds every
 decision with its evidence.
 
+## Releasing
+
+A release is tagged `v<version>+homr<homr version>`, the package version and
+the homr release it ports, e.g. `v0.5.0+homr0.7.0`. Set the new version in
+`package.json` with the work it ships, then:
+
+```bash
+npm run check && npm run lint && npm test
+npm run build              # only dist/ is published, and nothing builds it for you
+npm pack --dry-run         # dist, LICENSE, NOTICE and README, nothing else
+git tag v0.5.0+homr0.7.0
+git push origin main --tags
+npm publish                # npm opens the browser for the passkey
+npm view homr-web version  # the new version
+```
+
+Push before publishing: the published code must already be public, since
+the repository is the AGPL source offer. The models are released apart, as
+`models-homr<homr version>`, and change only with a new homr release.
+
 ## Licence
 
 homr is licensed under the GNU Affero General Public License version 3, and
