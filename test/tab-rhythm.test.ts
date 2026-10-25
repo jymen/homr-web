@@ -118,6 +118,34 @@ describe("rhythmGeometry", () => {
     ]);
   });
 
+  it("follows a stem a pen slanted down to its beam", async () => {
+    const cv = await testOpenCv();
+    const { fill, ink } = page();
+    for (const y of LINE_Y) {
+      fill(50, 1150, y, y + 1);
+    }
+    const columns = [column(850, 1), column(900, 2)];
+    for (const { notes } of columns) {
+      for (const { box } of notes) {
+        fill(box.x, box.x + box.w - 1, box.y, box.y + box.h - 1);
+      }
+    }
+    for (const [x, top] of [
+      [850, 110],
+      [900, 130],
+    ] as const) {
+      for (let y = top; y <= 215; y += 1) {
+        const at = x + Math.floor((y - top) / 9);
+        fill(at, at + 1, y, y);
+      }
+    }
+    fill(860, 912, 210, 215);
+    const { stems } = rhythmGeometry(cv, ink, WIDTH, HEIGHT, group, columns);
+    expect(stems.map((s) => (s.kind === "none" ? "none" : s.beams))).toEqual([
+      1, 1,
+    ]);
+  });
+
   it("ties an arc to the two frets on the string under it, with the letter by the first", async () => {
     const cv = await testOpenCv();
     const { columns, ink } = drawn();

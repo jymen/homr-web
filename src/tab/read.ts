@@ -22,6 +22,7 @@ import {
   inkOf,
   type Mark,
   marksOf,
+  READ_MARK,
   type ReadCrops,
   readFret,
   type TabSystem,
@@ -585,7 +586,14 @@ async function placementByRecogniser(
   tab: DetectedTab,
   read: ReadCrops
 ): Promise<Placement> {
-  const { marks, short } = marksOf(cv, ink, page.width, page.height, tab.group);
+  const { marks, short } = marksOf(
+    cv,
+    ink,
+    page.width,
+    page.height,
+    tab.group,
+    READ_MARK
+  );
   const lineless = withoutLines(ink, page.width, page.height, tab);
   const readAll = async (list: readonly Mark[]): Promise<ReadMark[]> => {
     const crops = list.map((mark) =>

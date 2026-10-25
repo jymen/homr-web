@@ -131,6 +131,13 @@ const TAB = {
   maxHidden: 2,
   maxMarkHeight: 1.15,
   maxMarkWidth: 1,
+  /**
+   * A turned scan spreads a thin line over more rows than a line is thick:
+   * up to this many more per page column (a third of a degree) while its ink
+   * is still a line's thickness over its length. Weeping Willow's
+   * handwritten banjo page spreads its lines over 5 to 7 rows.
+   */
+  maxSlope: 0.006,
   /** A line is at most this many rows thick: max(4, width / 400). */
   maxThickness: 4,
   /** Two marks on one line merge into one number ("10") across a gap below this. */
@@ -180,7 +187,7 @@ const TAB = {
   thicknessShare: 1 / 400,
 } as const;
 
-/** A fret number, possibly with technique letters stuck to it ("S0", "7h"); "O" reads as 0. */
+/** A fret number, possibly with technique letters stuck to it ("S0", "7h"); "O" reads as 0, and so does "θ", a handwritten zero with its stroke slanting through it. */
 const FRET = /^([A-Za-z~/\\(]*?)(\d{1,2})([A-Za-z~/\\)]*)$/;
 
 /** The fret a recogniser read names, and the letters stuck to it, or undefined when the text is no fret. */
@@ -189,7 +196,7 @@ export function readFret(
 ): { readonly fret: number; readonly letters: string } | undefined {
   const match = text
     .trim()
-    .replace(/[Oo](?=\d|$)/g, "0")
+    .replace(/[OoθΘ](?=\d|$)/g, "0")
     .match(FRET);
   if (!match) {
     return;
@@ -300,9 +307,56 @@ function lineRows(
 }
 
 /**
+ * The thickness of the line a turned scan spread over rows start..end-1, too
+ * many for a line: undefined unless they are a few rows too many, at most
+ * `maxSlope` per page column, and the ink in their long runs is at most
+ * `maxThick` over their length; then the ink down the median column that
+ * has any, which `findLines` compares with the page's level lines. Beams
+ * slanting across a staff fill such rows too, each as thick as a beam
+ * (Moon over Shanghai's sixteenths, 5 rows against lines of 3 or 4).
+ */
+function spreadThickness(
+  ink: Uint8Array,
+  cover: Uint32Array,
+  rows: { readonly end: number; readonly start: number },
+  line: PageLine,
+  width: number,
+  maxThick: number
+): number | undefined {
+  const { end, start } = rows;
+  if (end - start > maxThick + Math.round(width * TAB.maxSlope)) {
+    return;
+  }
+  let covered = 0;
+  for (let row = start; row < end; row += 1) {
+    covered += cover[row] ?? 0;
+  }
+  if (covered / (line.x1 - line.x0 + 1) > maxThick) {
+    return;
+  }
+  const thickness: number[] = [];
+  for (let x = line.x0; x <= line.x1; x += 1) {
+    let inked = 0;
+    for (let row = start; row < end; row += 1) {
+      inked += ink[row * width + x] ?? 0;
+    }
+    if (inked > 0) {
+      thickness.push(inked);
+    }
+  }
+  return medianOf(thickness);
+}
+
+const medianOf = (values: readonly number[]): number | undefined =>
+  [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)];
+
+/**
  * Rows covered by long horizontal runs, clustered into thin lines. A cluster
  * too thick for a line whose core rows are one (a beam lying against it) is
- * kept apart as `hidden`: groupLines takes it only to finish a group.
+ * kept apart as `hidden`: groupLines takes it only to finish a group. A
+ * cluster a few rows too tall that is a line a turned scan spread over them
+ * (spreadThickness) is a line when it is no thicker than the page's level
+ * lines, or `maxThick` on a page with none.
  */
 function findLines(
   ink: Uint8Array,
@@ -338,6 +392,7 @@ function findLines(
   };
   const lines: PageLine[] = [];
   const hidden: PageLine[] = [];
+  const spread: { line: PageLine; thickness: number }[] = [];
   let y = 0;
   while (y < height) {
     if ((cover[y] ?? 0) < minCover) {
@@ -348,17 +403,33 @@ function findLines(
     while (end < height && (cover[end] ?? 0) >= minCover) {
       end += 1;
     }
+    const core = end - y <= maxThick ? undefined : lineRows(cover, y, end);
     if (end - y <= maxThick) {
       lines.push(lineOf(y, end));
+    } else if (core !== undefined && core.end - core.start <= maxThick) {
+      hidden.push(lineOf(core.start, core.end));
     } else {
-      const core = lineRows(cover, y, end);
-      if (core !== undefined && core.end - core.start <= maxThick) {
-        hidden.push(lineOf(core.start, core.end));
+      const line = lineOf(y, end);
+      const thickness = spreadThickness(
+        ink,
+        cover,
+        { end, start: y },
+        line,
+        width,
+        maxThick
+      );
+      if (thickness !== undefined) {
+        spread.push({ line, thickness });
       }
     }
     y = end;
   }
-  return { hidden, lines };
+  const level = medianOf(lines.map((l) => l.y1 - l.y0 + 1)) ?? maxThick;
+  const turned = spread.filter((s) => s.thickness <= level).map((s) => s.line);
+  return {
+    hidden,
+    lines: [...lines, ...turned].sort((a, b) => a.y - b.y),
+  };
 }
 
 /**
@@ -726,32 +797,61 @@ function hangsAStem(band: Band, cols: number, box: Box, s: number): boolean {
   );
 }
 
+/** The largest mark taken for a fret, in line spacings. */
+export interface MarkSize {
+  readonly maxHeight: number;
+  readonly maxWidth: number;
+}
+
+/** Deciding whether a group is a tab: printed frets, smaller than a staff's noteheads. */
+const PRINTED_MARK: MarkSize = {
+  maxHeight: TAB.maxMarkHeight,
+  maxWidth: TAB.maxMarkWidth,
+};
+
+/**
+ * Reading a system already known to be a tab: a hand writes its digits
+ * larger than a line space (Weeping Willow's zeros are 1.05 to 1.3 wide and
+ * up to 1.25 tall), which deciding whether a group is a tab must not take,
+ * as a staff's noteheads are that size too. A mark taller than a printed
+ * fret must still be wider than a stroke: a piece of stem crossing a line is
+ * that tall too (Arkansas Traveler's TablEdit stems read as 1s).
+ */
+export const READ_MARK: MarkSize = { maxHeight: 1.3, maxWidth: 1.35 };
+
 /**
  * The band's components of a fret's size. On a system whose frets hang
  * their stems (at least two do), the components too big to be a fret are
  * cut between the lines (cutBetweenLines) and their pieces grown back over
  * the cuts; the rest stand as they are, and so does every component of a
- * system that hangs no stems (docs/design/tab-4-findings.md).
+ * system that hangs no stems (docs/design/tab-4-findings.md). `size` bounds
+ * the components of a system that hangs no stems; one that hangs them is
+ * printed, and is cut and bounded at the printed size.
  */
 function fretSized(
   cv: OpenCv,
   band: Band,
   cols: number,
-  group: LineGroup
+  group: LineGroup,
+  size: MarkSize
 ): Box[] {
   const s = group.spacing;
-  const sized = (box: Box) =>
-    box.h >= TAB.minMarkHeight * s &&
-    box.h <= TAB.maxMarkHeight * s &&
-    box.w >= Math.max(2, TAB.minMarkWidth * s) &&
-    box.w <= TAB.maxMarkWidth * s;
+  const sizedBy =
+    ({ maxHeight, maxWidth }: MarkSize) =>
+    (box: Box) =>
+      box.h >= TAB.minMarkHeight * s &&
+      box.h <= maxHeight * s &&
+      (box.h <= TAB.maxMarkHeight * s || box.w >= TAB.strokeWidth * s) &&
+      box.w >= Math.max(2, TAB.minMarkWidth * s) &&
+      box.w <= maxWidth * s;
   const { boxes, labels } = componentsOf(cv, band.data, cols, band.rows);
   if (
     boxes.filter((box) => hangsAStem(band, cols, box, s)).length <
     TAB.minHanging
   ) {
-    return boxes.filter(sized);
+    return boxes.filter(sizedBy(size));
   }
+  const sized = sizedBy(PRINTED_MARK);
   const big = new Set(
     boxes.flatMap((box, k) =>
       box.h > TAB.maxMarkHeight * s || box.w > TAB.maxMarkWidth * s
@@ -800,19 +900,21 @@ function solid(ink: Uint8Array, cols: number, box: Box): boolean {
  * Digit-sized components on a line, touching ones merged ("12"), in page
  * pixels, ordered by line then x. `short` holds the marks under 0.75 of the
  * median height: arcs cut by a stem, and x-height letters ("x", "o").
+ * `size` bounds the marks taken.
  */
 export function marksOf(
   cv: OpenCv,
   ink: Uint8Array,
   width: number,
   height: number,
-  group: LineGroup
+  group: LineGroup,
+  size: MarkSize = PRINTED_MARK
 ): { readonly marks: Mark[]; readonly short: Mark[] } {
   const s = group.spacing;
   const band = bandWithoutLines(ink, width, height, group);
   const cols = group.x1 - group.x0 + 1;
   const onLines: Mark[] = [];
-  for (const box of fretSized(cv, band, cols, group)) {
+  for (const box of fretSized(cv, band, cols, group, size)) {
     const y = box.y + band.top;
     const centre = y + box.h / 2;
     let line = 0;

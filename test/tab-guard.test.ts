@@ -5,13 +5,17 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { withMatScope } from "../src/cv/opencv.js";
 import type { ModelStore } from "../src/models/store.js";
 import { ctcCharacters } from "../src/ocr/ctc.js";
 import { recognizeCrops } from "../src/ocr/rapid-ocr.js";
 import { recognizePage } from "../src/pipeline/recognize.js";
 import {
   detectTablature,
+  inkOf,
   isFretText,
+  marksOf,
+  READ_MARK,
   type ReadCrops,
   whitenTablature,
 } from "../src/tab/detect.js";
@@ -52,7 +56,18 @@ const detect = async (systems: readonly Drawn[], read: ReadCrops) =>
 
 describe("isFretText", () => {
   it("takes a fret with a technique letter stuck to it, and an O for a zero", () => {
-    for (const text of ["0", "7", "12", "24", "S0", "7h", "p3", "O", "1O"]) {
+    for (const text of [
+      "0",
+      "7",
+      "12",
+      "24",
+      "S0",
+      "7h",
+      "p3",
+      "O",
+      "1O",
+      "θ",
+    ]) {
       expect(isFretText(text), text).toBe(true);
     }
   });
@@ -79,6 +94,54 @@ describe("detectTablature without a recogniser", () => {
     expect(six?.system.cy).toBeCloseTo((300 + (5 * TAB) / 2) / PAGE_HEIGHT, 2);
     expect(six?.system.h).toBeCloseTo((5 * TAB) / PAGE_HEIGHT, 2);
     expect(six?.system.w).toBeCloseTo((PAGE_WIDTH - 180) / PAGE_WIDTH, 2);
+  });
+
+  it("finds a tab whose lines a turned scan spreads over several rows each", async () => {
+    const tabs = await detect(
+      [
+        { kind: "tab", lines: 6, spacing: TAB, tilt: 6, top: 300 },
+        { kind: "tab", lines: 4, spacing: TAB, tilt: -5, top: 800 },
+      ],
+      unreachable
+    );
+    expect(tabs.map((t) => t.system.lines)).toEqual([6, 4]);
+  });
+
+  it("takes no group of rules too thick for lines, level or not", async () => {
+    const tabs = await detect(
+      [
+        { kind: "tab", lines: 4, spacing: TAB, thickness: 7, top: 300 },
+        {
+          kind: "tab",
+          lines: 4,
+          spacing: TAB,
+          thickness: 7,
+          tilt: 4,
+          top: 800,
+        },
+      ],
+      unreachable
+    );
+    expect(tabs).toEqual([]);
+  });
+
+  it("takes a hand's wide zeros for marks when reading a tab, not when deciding whether a group is one", async () => {
+    const cv = await testOpenCv();
+    const page = drawPage(cv, [
+      { kind: "tab", lines: 6, spacing: TAB, top: 300, wideZeros: true },
+    ]);
+    const [tab] = await detectTablature(cv, page, unreachable);
+    expect(tab).toBeDefined();
+    if (tab === undefined) {
+      return;
+    }
+    const ink = withMatScope(
+      (scope) => new Uint8Array(inkOf(cv, scope, page).data)
+    );
+    const count = (size?: typeof READ_MARK) =>
+      marksOf(cv, ink, page.width, page.height, tab.group, size).marks.length;
+    expect(count()).toBeLessThan(4);
+    expect(count(READ_MARK)).toBe(24);
   });
 
   it("never reads a standard staff: its noteheads are wider than a line space", async () => {

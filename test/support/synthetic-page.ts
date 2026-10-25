@@ -26,6 +26,12 @@ export type Drawn =
       readonly kind: "tab";
       readonly lines: 4 | 5 | 6;
       readonly spacing: number;
+      /** Line thickness in pixels; 2 when absent. */
+      readonly thickness?: number;
+      /** Rows each line drops from its left end to its right end, as a scan turned a little; 0 when absent. */
+      readonly tilt?: number;
+      /** Zeros as a hand writes them, hollow ovals about 1.2 line spacings wide, in place of the printed frets. */
+      readonly wideZeros?: boolean;
       readonly top: number;
     }
   | { readonly kind: "staff"; readonly spacing: number; readonly top: number };
@@ -35,11 +41,18 @@ function drawLines(
   page: Mat,
   top: number,
   count: number,
-  spacing: number
+  spacing: number,
+  { thickness = 2, tilt = 0 }: { thickness?: number; tilt?: number } = {}
 ): void {
   for (let k = 0; k < count; k += 1) {
     const y = top + k * spacing;
-    cv.line(page, new cv.Point(X0, y), new cv.Point(X1, y), BLACK, 2);
+    cv.line(
+      page,
+      new cv.Point(X0, y),
+      new cv.Point(X1, y + tilt),
+      BLACK,
+      thickness
+    );
   }
   for (const x of [X0, X1]) {
     cv.line(
@@ -91,6 +104,26 @@ function drawFrets(
       BLACK,
       2
     );
+  }
+}
+
+/** Hollow ovals about 1.2 spacings wide and 0.95 tall, one per column on each line in turn, on white. */
+function drawWideZeros(
+  cv: OpenCv,
+  page: Mat,
+  top: number,
+  lines: number,
+  spacing: number
+): void {
+  for (let column = 0; column < 24; column += 1) {
+    const x = X0 + 60 + column * 40;
+    const y = top + (column % lines) * spacing;
+    const axes = new cv.Size(
+      Math.round(spacing * 0.55),
+      Math.round(spacing * 0.45)
+    );
+    cv.ellipse(page, new cv.Point(x, y), axes, -15, 0, 360, WHITE, -1);
+    cv.ellipse(page, new cv.Point(x, y), axes, -15, 0, 360, BLACK, 2);
   }
 }
 
@@ -149,8 +182,12 @@ export function drawPage(cv: OpenCv, systems: readonly Drawn[]): ColorImage {
     );
     for (const system of systems) {
       if (system.kind === "tab") {
-        drawLines(cv, page, system.top, system.lines, system.spacing);
-        drawFrets(cv, page, system.top, system.lines, system.spacing);
+        drawLines(cv, page, system.top, system.lines, system.spacing, system);
+        if (system.wideZeros === true) {
+          drawWideZeros(cv, page, system.top, system.lines, system.spacing);
+        } else {
+          drawFrets(cv, page, system.top, system.lines, system.spacing);
+        }
       } else {
         drawLines(cv, page, system.top, 5, system.spacing);
         drawNotes(cv, page, system.top, system.spacing);

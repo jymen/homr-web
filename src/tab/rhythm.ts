@@ -61,6 +61,8 @@ const RHYTHM = {
   letterMinWidth: 0.15,
   letterReach: 0.9,
   letterTries: 3,
+  /** A stem leans at most this many columns per row (about 8 degrees). */
+  stemLean: 0.15,
   /** And at most this wide. */
   stemMaxWidth: 0.2,
   /** A stem is at least this long. */
@@ -240,6 +242,7 @@ function barlinesOf(
   }));
 }
 
+/** A stem, in window pixels: `x` is its column at its lower end, where its beams are. */
 interface Stem {
   readonly bottom: number;
   readonly top: number;
@@ -247,9 +250,33 @@ interface Stem {
 }
 
 /**
- * The longest thin vertical run under a fret column: starting below its
- * lowest fret, no lower than `stemStart` under the bottom line, at least
- * `stemMinLength` long.
+ * The ink run down from (x, y), stepping a column aside where the ink does,
+ * as long as it leans at most `stemLean`: a pen's stem slants, so a run down
+ * one column ends partway (Weeping Willow's stems leave their column after
+ * two or three line spacings, above their beams). The column at each row.
+ */
+function stemPath(w: Window, x: number, y: number): number[] {
+  const path: number[] = [];
+  let at = x;
+  for (let row = y; inkAt(w, at, row); row += 1) {
+    path.push(at);
+    const next = [at, at - 1, at + 1].find(
+      (c) =>
+        inkAt(w, c, row + 1) &&
+        Math.abs(c - x) <= Math.max(1, RHYTHM.stemLean * (path.length + 1))
+    );
+    if (next === undefined) {
+      break;
+    }
+    at = next;
+  }
+  return path;
+}
+
+/**
+ * The longest thin run down under a fret column, leaning at most
+ * `stemLean`: starting below its lowest fret, no lower than `stemStart`
+ * under the bottom line, at least `stemMinLength` long.
  */
 function stemUnder(
   w: Window,
@@ -271,13 +298,15 @@ function stemUnder(
     if (y > latest) {
       continue;
     }
-    const length = runFrom(w, x, x, y, 1);
+    const path = stemPath(w, x, y);
+    const { length } = path;
+    const middle = Math.floor(length / 2);
     if (
       length >= RHYTHM.stemMinLength * s &&
       (best === undefined || length > best.bottom - best.top) &&
-      widthAt(w, x, y + Math.floor(length / 2)) <= RHYTHM.stemMaxWidth * s
+      widthAt(w, path[middle] ?? x, y + middle) <= RHYTHM.stemMaxWidth * s
     ) {
-      best = { bottom: y + length - 1, top: y, x };
+      best = { bottom: y + length - 1, top: y, x: path.at(-1) ?? x };
     }
   }
   return best;

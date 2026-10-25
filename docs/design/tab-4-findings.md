@@ -375,6 +375,60 @@ text layer they resolve to a tune of 32 bars in gCGCD.
 6. **Leave `TabTuneNote.midi` for display**: the app computes pitches from
    strings and capo itself, and the two agree by construction.
 
+## A handwritten scan: Weeping Willow (2026-10-25)
+
+The owner's `weeping-weelow.png`: a scanned page of five-string banjo tab
+written by hand, five tab lines and an empty one, eighth notes beamed under
+the tab, chord names, a start repeat, first and second endings. homr-web
+0.5.1 found two tab systems of the six; homr read the other four as treble
+staves, so the app took the staff path and made a tune of tab lines read as
+notes, with every fret digit a `T:` line. Four causes, three fixed:
+
+1. **The scan is turned a third of a degree.** Each line of systems 3 to 6
+   spreads over 5 to 7 rows, more than `maxThickness`, and `findLines`
+   dropped it. A cluster up to `maxSlope` (0.006 rows per column) too tall
+   is now a line when its long-run ink is at most a line's thickness over
+   its length and its median inked column no thicker than the page's level
+   lines (`spreadThickness`). The second test is what keeps Moon over
+   Shanghai page 3's slanting sixteenth beams (5 rows a column, lines 3 or
+   4) from making a sixth line over a staff.
+2. **A hand writes its digits larger than a line space.** Zeros 1.05 to 1.3
+   spacings wide, a 4 and a drone 0 1.2 tall, all over `maxMarkWidth` and
+   `maxMarkHeight`. Reading a system already found to be a tab now takes
+   marks up to `READ_MARK` (1.3 tall, 1.35 wide); deciding whether a group
+   is a tab keeps the printed bounds, under a staff's noteheads, and so does
+   a system whose frets hang their stems (Peghead Nation: the larger bound
+   there let the TAB clef letters and fret-plus-stem pieces through, and
+   Cotton-Eyed Joe lost its time signature), and a mark taller than a
+   printed fret must be wider than a stroke (a piece of TablEdit stem
+   crossing Arkansas Traveler's bottom line read as a 1). The recogniser
+   reads a handwritten zero as "θ", now a 0.
+3. **A pen's stem slants.** The straight run down one column ended two or
+   three spacings below the fret, above the beam, so every eighth read as a
+   quarter. `stemPath` follows the ink a column aside, leaning at most
+   `stemLean` (0.15), and the beams are looked for at the stem's lower end.
+4. **Not fixed: the hand itself.** The guard still finds the endings line
+   too few printed-size digits to call it a tab (4 marks, "日" for a zero),
+   the recogniser reads a handwritten 4 as "u" and a 1 drawn as a tick not
+   at all, a 5 or 2 written across a line is cut in two by the line
+   erasure, and the top of a stem drawn through the tab reads as a "1" on
+   the line it starts at. Mapping "u" to 4 would be guessing; it was not
+   done.
+
+On lines 1 and 2, 17 of the page's 59 events came out in order before, 45
+after, and the stems give 45 of the 47 events read there their printed
+value, against 12 of 19 before. The page still needs the bar fixer: about a
+fret in four is missing or extra, and with six of eight eighths read per bar
+the best-fitting meter offered first is 3/4.
+
+Rechecked: `tools/tab-rhythm-accuracy.ts` on its 14 pages moves from 218 to
+221 of 242 bars summing to the meter and from 710 to 715 of 724 durations
+agreeing (Moon over Shanghai's slanting stems, 176 to 184 stemmed events;
+Old Joe Clark one more), every other page unchanged; the 21 pages of
+`tab-local.test.ts` and Cotton-Eyed Joe from the image and the text layer
+pass; and the app's harness reads five sample PDFs and two staff photos to
+the same events, stems and ABC.
+
 ## What remains
 
 - Rests, tuplets, two voices in one tab, stems above the tab (all reported
@@ -384,4 +438,5 @@ text layer they resolve to a tune of 32 bars in gCGCD.
 - Several pages of one tune resolve together when their readings are passed
   in page order (Billy in the Lowground's page 2 prints no tuning and takes
   page 1's); the app has to keep page 1's readings for that.
-- Scans and photos: unchanged from tab-2 and tab-3.
+- Scans and photos: unchanged from tab-2 and tab-3, but for a turned scan's
+  lines and a hand's large digits and slanting stems (Weeping Willow, above).
