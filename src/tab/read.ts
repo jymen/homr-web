@@ -16,10 +16,11 @@ import { withMatScope } from "../cv/opencv.js";
 import type { ColorImage } from "../image/plane.js";
 import {
   type Box,
-  bandWithoutLines,
   cropOf,
   type DetectedTab,
+  HAND_MARK,
   inkOf,
+  inkWithoutLines,
   type Mark,
   marksOf,
   READ_MARK,
@@ -27,6 +28,7 @@ import {
   readFret,
   type TabSystem,
 } from "./detect.js";
+import { type ClassifyDigits, fuseDigit } from "./digits.js";
 import { glyphsOf, onLines, type PageTextItem, textIn } from "./layer.js";
 import {
   type FretColumn,
@@ -400,34 +402,13 @@ function struck(
 }
 
 /**
- * The page's ink with the tab's lines erased over its band, so a crop of a
- * number the line runs through shows the number alone: the recogniser reads
- * "12" with a line across it as "2".
- */
-function withoutLines(
-  ink: Uint8Array,
-  width: number,
-  height: number,
-  tab: DetectedTab
-): Uint8Array {
-  const band = bandWithoutLines(ink, width, height, tab.group);
-  const cols = tab.group.x1 - tab.group.x0 + 1;
-  const out = ink.slice();
-  for (let y = 0; y < band.rows; y += 1) {
-    out.set(
-      band.data.subarray(y * cols, (y + 1) * cols),
-      (y + band.top) * width + tab.group.x0
-    );
-  }
-  return out;
-}
-
-/**
  * Each tab's frets, techniques, unread marks and rhythm marks, in the tabs'
  * order. A system's digit-height marks go to `read` in one call, the batch
  * the prototype measured, its short marks in a second, and the letters by
  * its arcs with its time signature's digits in a third. `onSystem` is told
- * after each system.
+ * after each system. `classify`, the tab digit classifier, second-reads the
+ * digit-height marks of a system read off the page's ink (fuseDigit); without
+ * it RapidOCR's reads stand alone.
  */
 export async function readTablature(
   cv: OpenCv,
@@ -435,7 +416,8 @@ export async function readTablature(
   tabs: readonly DetectedTab[],
   read: ReadCrops,
   onSystem?: (done: number, total: number) => void,
-  layer: readonly PageTextItem[] = []
+  layer: readonly PageTextItem[] = [],
+  classify?: ClassifyDigits
 ): Promise<TabReading[]> {
   if (tabs.length === 0) {
     return [];
@@ -461,7 +443,7 @@ export async function readTablature(
           page.width
         )
       : // biome-ignore lint/performance/noAwaitInLoops: one recogniser session, one system at a time
-        await placementByRecogniser(cv, page, ink, tab, read);
+        await placementByRecogniser(cv, page, ink, tab, read, classify);
     const readBoxes = async (wanted: readonly Box[]): Promise<string[]> => {
       const inLayer = wanted.map((box) =>
         fromLayer ? textIn(glyphs, box, LAYER_PAD * tab.group.spacing) : ""
@@ -584,7 +566,8 @@ async function placementByRecogniser(
   page: ColorImage,
   ink: Uint8Array,
   tab: DetectedTab,
-  read: ReadCrops
+  read: ReadCrops,
+  classify: ClassifyDigits | undefined
 ): Promise<Placement> {
   const { marks, short } = marksOf(
     cv,
@@ -592,10 +575,13 @@ async function placementByRecogniser(
     page.width,
     page.height,
     tab.group,
-    READ_MARK
+    tab.hand === true ? HAND_MARK : READ_MARK
   );
-  const lineless = withoutLines(ink, page.width, page.height, tab);
-  const readAll = async (list: readonly Mark[]): Promise<ReadMark[]> => {
+  const lineless = inkWithoutLines(ink, page.width, page.height, tab.group);
+  const readAll = async (
+    list: readonly Mark[],
+    fuse: ClassifyDigits | undefined
+  ): Promise<ReadMark[]> => {
     const crops = list.map((mark) =>
       cropOf(
         page,
@@ -605,10 +591,24 @@ async function placementByRecogniser(
       )
     );
     const texts = crops.length === 0 ? [] : await read(crops);
-    return list.map((mark, k) => ({ mark, text: texts[k] ?? "" }));
+    const guesses =
+      fuse === undefined || crops.length === 0 ? [] : await fuse(crops);
+    return list.map((mark, k) => {
+      const text = texts[k] ?? "";
+      const guess = guesses[k];
+      return {
+        mark,
+        text:
+          guess === undefined
+            ? text
+            : fuseDigit(text, readMark(text).kind !== "unread", guess),
+      };
+    });
   };
-  const tall = await readAll(marks);
-  return placementOf(tab, tall, await readAll(short), page.width);
+  // The classifier reads the digit-height marks only: a short mark is a
+  // technique letter or a piece of a glyph far more often than a fret.
+  const tall = await readAll(marks, classify);
+  return placementOf(tab, tall, await readAll(short, undefined), page.width);
 }
 
 const fretColumnOf = (column: Column): FretColumn => ({

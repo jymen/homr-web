@@ -84,7 +84,8 @@ lines, page-normalised like `staves`, `index` from the top), each with the
 frets read on it. A page with nothing but tabs answers `tablature_only` with
 its systems and their frets, rather than notes that are not there.
 
-A system is a run of four to six evenly spaced horizontal lines. Four or six
+A system is a run of four to six evenly spaced horizontal lines (a beam row
+lying within a few pixels of a line is not counted as a line). Four or six
 lines is a tab; five lines is a tab when the marks sitting on its lines read
 as numbers, which RapidOCR's recogniser decides from a sample of at most
 twelve of them. A page with no tab, and no five-line group carrying such
@@ -96,7 +97,16 @@ apart), where homr reads the tab as before.
 Each tab system then has its frets read: every digit-sized mark sitting on a
 line is read by the same recogniser, on its own (or taken from the PDF's text
 layer, below). A fret printed touching its stem, or touching the frets
-stacked over it, is cut from them between the lines first.
+stacked over it, is cut from them between the lines first. A small
+handwritten-digit classifier (`tabDigits`, half a megabyte, this project's
+own) reads the same marks a second time: where it is at least 0.95 sure of a
+digit and the recogniser read nothing usable or another single digit, its
+digit stands, so a hand's 4 read as "u" or 0 read as "9" comes out right.
+Print is left as the recogniser reads it.
+
+Only a system read to at least one event is painted out. A system the guard
+took for a tab and read nothing on is left on the page for homr, and stays
+in `tablature` with no events, so a staff the guard mistook is still read.
 
 ```ts
 for (const tab of result.tablature) {
@@ -354,13 +364,18 @@ SHA-256 before use.
 | `090f04abcd9d9a7498bc4ebf677e4cb9bdce1fe4197ddb7e529f1ef44e1ff94f/PP-OCRv6_det_small.onnx` | both, OCR | 9 929 594 |
 | `e47acedf663230f8863ff1ab0e64dd2d82b838fceb5957146dab185a89d6215c/ch_ppocr_mobile_v2.0_cls_mobile.onnx` | both, OCR | 585 532 |
 | `6f327246b50388f3c176ae304bd95767ea6dc0c9ae92153ef8cbe210b3c14884/PP-OCRv6_rec_small.onnx` | both, OCR | 21 234 383 |
+| `037fac028e121b4d133e5f6bcd1099a1914e692e68ed90f7d3e1bb94d5bdcda3/tab-digits-037fac028e12.onnx` | both, tab frets | 471 919 |
 
 The fp32 files are the ones homr 0.7.0 installs; the two fp16 files are
 homr's own `onnx_checkpoints` release assets; the three OCR files are the ones
 rapidocr 3.9.2 ships in its wheel and loads by default (PP-OCRv6 small
 detection and recognition, the PP-OCRv4 line of the v2.0 mobile direction
 classifier), Apache 2.0. `tools/fetch-models.sh`
-collects all of them into `models/`.
+collects all of them into `models/`. The tab digit classifier is this
+project's own, trained by `tools/train-tab-digits.sh` on MNIST and on crops
+of the tab pages typeset for this repository, and published with the
+models release; its weights are under MNIST's licence, Creative Commons
+Attribution-Share Alike 3.0 ([NOTICE](NOTICE)).
 
 ### Cross-origin isolation
 
@@ -425,7 +440,7 @@ Scans, published pages and photographs stay in the git-ignored
 ```bash
 PYTHON=python3.12 ./tools/venv.sh   # once: homr 0.7.0 in .venv
 ./tools/fetch-models.sh              # the models, into models/ (from the venv)
-# or, with no venv, as CI does: download and hash-check all nine
+# or, with no venv, as CI does: download and hash-check all ten
 HOMR_WEB_MODELS_RELEASE=models-homr0.7.0 ./tools/download-models.sh
 npm run golden && npm run vectors    # regenerate the oracle
 npm run ocr                          # RapidOCR's stages per strip
@@ -459,7 +474,11 @@ npm view homr-web version  # the new version
 
 Push before publishing: the published code must already be public, since
 the repository is the AGPL source offer. The models are released apart, as
-`models-homr<homr version>`, and change only with a new homr release.
+`models-homr<homr version>`, and change with a new homr release or a new
+tab digit classifier: a retrained `models/tab-digits-<hash>.onnx` is a new
+file name and a new manifest pin (`node tools/gen-manifest.mjs`), uploaded as
+an asset of the models release before the package that pins it is published,
+or every host that downloads the models fails its hash check.
 
 ## Licence
 

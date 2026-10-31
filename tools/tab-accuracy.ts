@@ -38,6 +38,7 @@ import { ctcCharacters } from "../src/ocr/ctc.js";
 import { RapidOcr, recognizeCrops } from "../src/ocr/rapid-ocr.js";
 import { recognizePage } from "../src/pipeline/recognize.js";
 import { detectTablature, type ReadCrops } from "../src/tab/detect.js";
+import { type ClassifyDigits, classifyDigits } from "../src/tab/digits.js";
 import { pitchTab } from "../src/tab/pitch.js";
 import { readTablature, type TabReading } from "../src/tab/read.js";
 import { readTabText } from "../src/tab/text.js";
@@ -254,6 +255,8 @@ console.log(
 );
 const read: ReadCrops = async (crops) =>
   (await recognizeCrops(cv, session, characters, crops)).map((r) => r.text);
+const digits = await store.open("tabDigits");
+const classify: ClassifyDigits = (crops) => classifyDigits(digits, crops);
 
 if (process.argv.includes("--text")) {
   await scoreText();
@@ -267,7 +270,15 @@ for (const entry of entries) {
   const started = performance.now();
   const tabs = await detectTablature(cv, page, read);
   const detected = performance.now();
-  const readings = await readTablature(cv, page, tabs, read);
+  const readings = await readTablature(
+    cv,
+    page,
+    tabs,
+    read,
+    undefined,
+    [],
+    classify
+  );
   const done = performance.now();
   readingsByKey.set(entry.key, readings);
   const notes = readings.reduce(

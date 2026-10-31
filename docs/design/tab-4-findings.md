@@ -429,6 +429,147 @@ Old Joe Clark one more), every other page unchanged; the 21 pages of
 pass; and the app's harness reads five sample PDFs and two staff photos to
 the same events, stems and ABC.
 
+## A digit classifier for a hand, and staves the guard took (2026-10-31)
+
+### The tab digit classifier
+
+RapidOCR reads print well and a hand badly: on Weeping Willow it reads a
+handwritten 4 as "u", a 0 as "9" or "6", and a 1 drawn as a tick not at all.
+homr-web 0.5.3 adds a second reader for the frets of a system read off the
+page's ink: a small convolutional classifier (`src/tab/digits.ts`, the
+`tabDigits` model role, `models/tab-digits-037fac028e12.onnx`, 471 919 bytes,
+about 117 000 weights, fp32, opset 17, input `x` [n, 1, 28, 28], output
+`logits` [n, 11]). It answers ten digits and an eleventh class, not a digit.
+Its input is the mark's tight ink box scaled so its longer side is 20 pixels
+and centred in 28 x 28, MNIST's own form (`digitInput`, the one definition).
+
+**Data.** MNIST (LeCun, Cortes and Burges, Creative Commons
+Attribution-Share Alike 3.0; the weights carry the same licence, NOTICE)
+and crops of the pages typeset for this repository, nothing else:
+
+- MNIST digits drawn by `tools/tab-digits-data.ts` on synthetic tab systems
+  at line spacings of 10 to 22 pixels, 0.9 to 1.8 spacings tall, slanted,
+  with pen stems hanging from them, lone stems through the tab, clawhammer
+  brush arrows and slur arcs among them, then put through the reader's own
+  line erasure, mark finding and cropping. A mark is labelled with the digit
+  it came from, or "not a digit" when it covers less than 0.6 of a digit's
+  box (a stem stub, a piece of arc, half a digit the line erasure cut).
+  Four training sets of 10 000 pages (46 862 crops), one held-out set.
+- The 14 typeset pages of `test/fixtures/tab/` read the same way and
+  labelled from `truth.json`: 316 crops, the printed digits and, as not a
+  digit, the TAB clef's letters, Sl, Po, H, R, h, p, x and slur pieces.
+- MNIST digits under a pen-on-tab augmentation, fragments of them and
+  curved strokes, made by the trainer.
+
+`tools/train-tab-digits.sh` rebuilds everything from scratch (a venv in
+`.venv-digits`, MNIST in `.digits/`, 8000 CPU steps, every seed fixed) and
+names the result by its hash. Regenerating the crops reproduced all three
+sets byte for byte, and retraining from them gave the same file, SHA-256 for
+SHA-256 (torch 2.15.0 on an Apple M-series CPU; another platform may differ
+in the last bits). The first generator drew its random numbers from an LCG
+computed in doubles, which loses its low bits past 2^53 and fell into a
+short cycle (one training set held 4 nines and 11 063 non-digits in 15 415
+crops); it is mulberry32 now.
+
+**Accuracy.** 88.5% on 5000 MNIST test digits under the tab augmentation, a
+line through 40% of them (1s are the weakest, 0.89: a pen's 1 is the stem
+the not-a-digit class also learns), 89.8% on the held-out synthetic crops,
+316 of 316 on the fixture crops (seen in training), and 29 of 30 on digits
+drawn in OpenCV's Hershey script face, which it never saw
+(`test/tab-digits.test.ts`).
+
+**The rule (`fuseDigit`).** The classifier reads every digit-height mark of
+a system read off the ink, beside RapidOCR. Where it is at least 0.95 sure of
+a digit and RapidOCR read either nothing the reader can use or another single
+digit, its digit stands. A two-digit fret, a technique letter, a fret with
+letters stuck to it and every short mark are RapidOCR's alone, and "not a
+digit" never removes a read. Measured on Weeping Willow against a hand
+transcription of its five lines (notes in order, longest common
+subsequence), and on 16 printed tab pages (2189 notes) against RapidOCR's
+own reading:
+
+| rule | Weeping Willow | printed notes changed |
+|---|---|---|
+| RapidOCR alone | 80/129 | - |
+| fill where RapidOCR read nothing usable, 0.9 | 90/129 | 0 |
+| fill, 0.7 | 92/129 | 6 |
+| fill, 0.5 | 92/129 | 11 |
+| fill and replace any one-character read, 0.9 | 94/129 | 2 (Sourwood Mountain's S of Sl read as a 5) |
+| classifier first, 0.9 | 94/129 | 25 |
+| **fill and replace a one-digit read, 0.95 (taken)** | **94/129** | **0** |
+| fill and replace a one-digit read, 0.8 | 96/129 | 4 (new frets on Arkansas Traveler and Borus March) |
+
+Per line, RapidOCR alone against the rule: line 1 20 to 23 of 27, line 2 26
+to 27 of 32, line 3 21 to 30 of 32, line 4 13 to 14 of 31, and the endings
+line 0 of 7 both ways (the guard does not find it). The earlier experiment's
+other modes (a CTC decode constrained to an alphabet, a classifier vote in
+the guard, the short marks read too) and its environment switches are gone.
+The model is fetched like the other nine, from `${baseUrl}/${sha256}/` with
+its hash checked, and only on a page with a tab read off its ink.
+
+Rechecked: the three typeset pages still read every event exactly with the
+classifier on (`test/tab-read.test.ts`); `tools/tab-rhythm-accuracy.ts`
+reads its 14 pages to 221 of 242 bars summing to the meter and 715 of 724
+durations agreeing, with the classifier and without it (`--no-digits`), the
+same events on every page; `npm test` passes, the 21 pages of
+`test/tab-local.test.ts` included (79 tab systems found).
+
+### Staves the guard took for tabs: Reel de Mattawa
+
+An engraved page of four staff systems in sixteenths (the app's sample
+`Reel_de_mattawa.pdf`). homr-web 0.5.2 logged `Tab guard: 2 tablature systems
+(4, 4 lines) painted out` and `Tab reader: 0, 0 events` at 300 and 400 dpi,
+and homr read bars 10 to 18 only. On system 1 a beam row two pixels under
+the top line (11% of the page wide) was kept as a line: the top line could
+not start a group (its gap to the beam under `minGap`), the beam row could
+not either (its break far over `maxBreak`), so the group started at the
+second line with four, which passes for a mandolin tab on its count. System 2
+has beam rows on both sides of its top line, one cluster ten rows tall that
+`findLines` keeps as neither a line nor a hidden one. Three changes, the
+third proposed and not taken:
+
+1. **Only a system read to an event is painted out** (`recognizePage`). A
+   system the guard took and read nothing on stays on the page for homr and
+   in `tablature` with no events; the log says `N painted out, M with no
+   event left to the staff reader`.
+2. **A line closer than `minGap` to the one before it is a beam lying on
+   it** (`withoutBeamRows`): of the two, the one with the shorter longest
+   break is kept. This alone gives system 1 its five lines; system 2's top
+   line is restored by the faint-ink completion made for Marche des élèves
+   (`withFaintLine`, below), which finds the line's row covering 0.8 of the
+   group's width.
+3. **Reading four- and six-line groups' marks as well, not taken.** It
+   loses two real tabs: Killdare Fancy's first system, whose top line runs
+   through its digits so every mark is half a digit (RapidOCR reads "上",
+   "U", "ど", the line-erased crops no better), and Moon over Shanghai p3's
+   last, a one-bar system holding one "0". Rejecting a four- or six-line
+   group with under four marks would have caught Mattawa (its groups hold 0
+   and 1) and loses that same one-bar system. Mattawa's groups never reach
+   a digit test anyway.
+
+On the 0.5.2 code, (2) alone keeps system 1 and not system 2; on the
+working tree, with the faint-ink completion, both systems are staves at 200,
+300 and 400 dpi and homr reads all four (`test/tab-staves-local.test.ts`,
+local only). The guard finds the same 79 tab systems on the 21 pages of
+`test/tab-local.test.ts`.
+
+**Marche des élèves (2026-10-28, kept).** The working tree also holds the
+fix for the app's 2711 x 3508 enlargement of an 820 x 1061 web image, where
+Otsu leaves a staff line spread over five pale rows and a pale stem out of
+the ink: `faintInkOf` (half way between the threshold and the paper),
+`withFaintLine` (a four-line group made five by a faint line a gap away) and
+`crossesAsStroke` (a mark where a pale stroke crosses a line is no fret).
+The same test reads its nine staves with no tab.
+
+**A handwritten second chance (2026-10-26, kept).** A five-line group with
+too few printed-size marks is looked at again at a hand's size
+(`HAND_MARK`, 2.2 spacings tall, 2.4 wide) after its stems are erased
+(`eraseStems`), and goes to the digit test when those marks sit on its
+lines, at most a third as many in its spaces (a staff's noteheads sit in
+both): a hand's circled zeros, 1.4 to 2.1 spacings, as on the owner's
+handwritten Sourwood Mountain. Such a tab is read at that size. Its debug
+dumps are gone; it changes nothing on the test pages above.
+
 ## What remains
 
 - Rests, tuplets, two voices in one tab, stems above the tab (all reported
@@ -439,4 +580,12 @@ the same events, stems and ABC.
   in page order (Billy in the Lowground's page 2 prints no tuning and takes
   page 1's); the app has to keep page 1's readings for that.
 - Scans and photos: unchanged from tab-2 and tab-3, but for a turned scan's
-  lines and a hand's large digits and slanting stems (Weeping Willow, above).
+  lines, a hand's large digits and slanting stems, and a hand's digits read
+  by the classifier (Weeping Willow, above).
+- Weeping Willow still loses 35 of 129 notes, for four reasons the
+  classifier cannot touch: the endings line is not found as a tab (4
+  printed-size marks, "日" for a zero: 7 notes); a 5 or 2 written across a
+  line is cut in two by the line erasure and read as neither; the top of a
+  stem drawn through the tab reads as a "1" on the line it starts at (line 4
+  reads 5/1 seven times); and a bar with a fret missing or extra needs the
+  bar fixer before its durations can be offered.

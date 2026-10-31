@@ -2,6 +2,9 @@ node_modules/
 dist/
 .venv/
 .venv-export/
+# tools/train-tab-digits.sh: its venv, MNIST and the generated training crops
+.venv-digits
+.digits/
 # tools/export-decoder.py: the pinned homr clone and the 278 MB checkpoint
 .export/
 *.onnx

@@ -8,9 +8,10 @@
 # testing the wrong model. Idempotent: a file already in models/ with the right
 # hash is left alone.
 #
-# The WebGPU decoder re-export (phase 8) is published nowhere upstream; it is
-# taken from this repository's own release when HOMR_WEB_MODELS_RELEASE names
-# one, and reported missing otherwise.
+# The WebGPU decoder re-export (phase 8) and the tab digit classifier
+# (tools/train-tab-digits.sh) are published nowhere upstream; they are taken
+# from this repository's own release when HOMR_WEB_MODELS_RELEASE names one,
+# and reported missing otherwise.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -32,7 +33,7 @@ source_of() {
     PP-OCRv6_det_small.onnx) echo "plain $rapidocr/PP-OCRv6/det/$1" ;;
     PP-OCRv6_rec_small.onnx) echo "plain $rapidocr/PP-OCRv6/rec/$1" ;;
     ch_ppocr_mobile_v2.0_cls_mobile.onnx) echo "plain $rapidocr/PP-OCRv4/cls/$1" ;;
-    *_web_fp16.onnx)
+    *_web_fp16.onnx | tab-digits-*.onnx)
       if [ -n "$own_release" ]; then
         echo "plain https://github.com/jymen/homr-web/releases/download/$own_release/$1"
       else

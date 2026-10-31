@@ -18,7 +18,10 @@
 //      "xml": "<optional absolute path>" }]
 // An entry with a "pdf" is rasterised into .pages/ first.
 //
-// usage: npx vite-node tools/tab-rhythm-accuracy.ts [name filter]
+// With --no-digits the frets are read by RapidOCR alone, without the tab digit
+// classifier (src/tab/digits.ts), to measure what the classifier changes.
+//
+// usage: npx vite-node tools/tab-rhythm-accuracy.ts [--layer] [--no-digits] [name filter]
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -32,6 +35,7 @@ import { ModelStore } from "../src/models/store.js";
 import { ctcCharacters } from "../src/ocr/ctc.js";
 import { RapidOcr, recognizeCrops } from "../src/ocr/rapid-ocr.js";
 import { detectTablature, type ReadCrops } from "../src/tab/detect.js";
+import { type ClassifyDigits, classifyDigits } from "../src/tab/digits.js";
 import { glyphsOf, linesIn, type PageTextItem } from "../src/tab/layer.js";
 import { readTablature, type TabReading } from "../src/tab/read.js";
 import { readTabText } from "../src/tab/text.js";
@@ -283,6 +287,12 @@ const session = await store.open("ocrRecognize");
 const characters = ctcCharacters(session.metadata.get("character") ?? "");
 const read: ReadCrops = async (crops) =>
   (await recognizeCrops(cv, session, characters, crops)).map((r) => r.text);
+const digits = await store.open("tabDigits");
+const classify: ClassifyDigits | undefined = process.argv.includes(
+  "--no-digits"
+)
+  ? undefined
+  : (crops) => classifyDigits(digits, crops);
 const ocr = new RapidOcr(cv, {
   classify: await store.open("ocrClassify"),
   detect: await store.open("ocrDetect"),
@@ -299,7 +309,15 @@ for (const entry of entries) {
       : [];
   const glyphs = glyphsOf(layer, page.width, page.height);
   const tabs = await detectTablature(cv, page, read);
-  const readings = await readTablature(cv, page, tabs, read, undefined, layer);
+  const readings = await readTablature(
+    cv,
+    page,
+    tabs,
+    read,
+    undefined,
+    layer,
+    classify
+  );
   const texts = await readTabText(
     layer.length > 0
       ? (_image, _score, _limit, region) =>

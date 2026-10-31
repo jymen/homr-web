@@ -79,3 +79,6 @@ ls -1 "$models"
 if [ ! -f "$models/decoder_pytorch_model_396-f6feedb42ff90087d898b0941a55d040fa6b2903_web_fp16.onnx" ]; then
   echo "the WebGPU decoder is not released anywhere: run tools/export-venv.sh, then .venv-export/bin/python tools/export-decoder.py" >&2
 fi
+if ! ls "$models"/tab-digits-*.onnx >/dev/null 2>&1; then
+  echo "the tab digit classifier is not in models/: run tools/train-tab-digits.sh, or tools/download-models.sh with HOMR_WEB_MODELS_RELEASE" >&2
+fi

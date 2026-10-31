@@ -32,6 +32,8 @@ export type Drawn =
       readonly tilt?: number;
       /** Zeros as a hand writes them, hollow ovals about 1.2 line spacings wide, in place of the printed frets. */
       readonly wideZeros?: boolean;
+      /** The lines and bar lines alone, no fret on them. */
+      readonly empty?: boolean;
       readonly top: number;
     }
   | { readonly kind: "staff"; readonly spacing: number; readonly top: number };
@@ -183,6 +185,9 @@ export function drawPage(cv: OpenCv, systems: readonly Drawn[]): ColorImage {
     for (const system of systems) {
       if (system.kind === "tab") {
         drawLines(cv, page, system.top, system.lines, system.spacing, system);
+        if (system.empty === true) {
+          continue;
+        }
         if (system.wideZeros === true) {
           drawWideZeros(cv, page, system.top, system.lines, system.spacing);
         } else {

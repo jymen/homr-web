@@ -1,0 +1,7 @@
+# tools/train-tab-digits.sh's venv (.venv-digits): CPU training of the tab
+# digit classifier and its ONNX export. Not needed to use or test the library.
+numpy==2.5.4
+onnx==1.23.2
+pillow==13.0.0
+torch==2.15.0
+torchvision==0.29.2

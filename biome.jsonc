@@ -38,6 +38,17 @@
       }
     },
     {
+      // The training-crop generator's seeded random numbers are mulberry32,
+      // 32-bit integer arithmetic: an LCG in doubles loses its low bits past
+      // 2^53 and falls into a short cycle (it did, 2026-10-31).
+      "includes": ["tools/tab-digits-data.ts"],
+      "linter": {
+        "rules": {
+          "suspicious": { "noBitwiseOperators": "off" }
+        }
+      }
+    },
+    {
       // resize.ts reproduces PIL's fixed-point resample, where the closing
       // `>> 22` is the arithmetic itself: a division by 2 ** 22 rounds where
       // the shift truncates, which is a different function and a different

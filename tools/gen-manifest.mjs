@@ -1,8 +1,9 @@
 // Regenerates src/models/manifest.ts's ARTIFACTS block and decoder tensor-name
-// tuples from the nine files in models/, eight from tools/fetch-models.sh and
-// one from tools/export-decoder.py. Every value it writes is a fact about a
-// file: the SHA-256, the byte length, and the input/output names, shapes and
-// element types read from the opened session.
+// tuples from the ten files in models/, eight from tools/fetch-models.sh, one
+// from tools/export-decoder.py and one from tools/train-tab-digits.sh. Every
+// value it writes is a fact about a file: the SHA-256, the byte length, and
+// the input/output names, shapes and element types read from the opened
+// session.
 // Nothing it writes is a judgement; MODEL_ROLES and resolveRole are
 // hand-written above the markers and this tool never touches them.
 //
@@ -36,6 +37,7 @@ const FILES = {
   "segnet-308-fp16":
     "segnet_308-3296ccd40960f90ca6ab9c035cca945675d30a0f_fp16.onnx",
   "segnet-308-fp32": "segnet_308-3296ccd40960f90ca6ab9c035cca945675d30a0f.onnx",
+  "tab-digits-1": "tab-digits-037fac028e12.onnx",
 };
 
 /** The union manifest.ts narrows TensorElementType to; a fourth means the design needs another look. */

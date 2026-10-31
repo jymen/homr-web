@@ -2,7 +2,8 @@
  * The tab reader on pages we typeset ourselves (tools/typeset-tab.mjs, truth
  * in test/fixtures/tab/truth.json): every event, string and fret exactly, the
  * technique letters as annotations, the pull-off arcs and the TAB clef never
- * read as frets.
+ * read as frets. Read with the tab digit classifier beside RapidOCR, as the
+ * pipeline reads: on print it must change nothing.
  */
 
 import { readFileSync } from "node:fs";
@@ -13,6 +14,7 @@ import { type ColorImage, colorImageFromRgba } from "../src/image/plane.js";
 import { ctcCharacters } from "../src/ocr/ctc.js";
 import { recognizeCrops } from "../src/ocr/rapid-ocr.js";
 import { detectTablature, type ReadCrops } from "../src/tab/detect.js";
+import { classifyDigits } from "../src/tab/digits.js";
 import { pitchTab } from "../src/tab/pitch.js";
 import {
   readTablature,
@@ -71,12 +73,16 @@ describeWithModels("readTablature on typeset tab pages", () => {
             (await recognizeCrops(cv, session, characters, crops)).map(
               (r) => r.text
             );
+          const digits = await store.open("tabDigits");
           const image = pageOf(page.file);
           const readings = await readTablature(
             cv,
             image,
             await detectTablature(cv, image, read),
-            read
+            read,
+            undefined,
+            [],
+            (crops) => classifyDigits(digits, crops)
           );
 
           expect(readings.map((r) => r.lines)).toEqual(

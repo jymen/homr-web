@@ -55,6 +55,8 @@ export interface LineGroup {
 /** A tab with the pixel geometry the guard paints over. */
 export interface DetectedTab {
   readonly group: LineGroup;
+  /** Found by the hand-written second chance (handWrittenMarks): read at HAND_MARK, stems erased. */
+  readonly hand?: boolean;
   readonly system: TabSystem;
 }
 
@@ -79,7 +81,13 @@ export interface Mark extends Box {
 
 /**
  * What decides a group: its line count alone, or the crops of its
- * line-sitting marks, which only a recogniser can settle.
+ * line-sitting marks, which only a recogniser can settle. Four and six lines
+ * stay a tab on their count: reading them as well loses Killdare Fancy's
+ * first system, whose top line runs through its digits and halves every one
+ * (2026-10-31), and Moon over Shanghai's last, a one-bar system holding one
+ * "0". A staff that loses a line to a beam is handled where lines are
+ * grouped (withoutBeamRows, withFaintLine) and, if still taken, by the
+ * pipeline painting out only systems read to events.
  */
 type Evidence = "tab" | "staff" | readonly ColorImage[];
 
@@ -87,6 +95,7 @@ type Evidence = "tab" | "staff" | readonly ColorImage[];
 interface Candidate {
   readonly evidence: Evidence;
   readonly group: LineGroup;
+  readonly hand?: boolean;
   readonly knockedOut: number | undefined;
 }
 
@@ -102,7 +111,20 @@ const TAB = {
   cutOutside: 0.5,
   /** What a cut leaves at one end narrower than this, in line spacings, is a piece of stem. */
   cutPieceWidth: 0.2,
+  /**
+   * A line the ink threshold lost, completing a four-line group into a
+   * staff: faint ink over this share of the group's width, one gap past its
+   * outer line (see faintLine).
+   */
+  faintLineCover: 0.8,
   gapTolerance: 0.2,
+  /**
+   * A hand-written tab's frets are as large as a staff's noteheads, but sit
+   * on its lines; a staff's noteheads sit in its spaces as often. At most
+   * this share of hand-sized marks in the spaces, against those on lines: a
+   * finger letter ("M", "T") beside the frets lands in a space.
+   */
+  handInSpaceShare: 1 / 3,
   /** hangsAStem: at least this tall, the head at least this tall, and this share of the rows below it a stem's width. */
   /** The stem hangs within this share of the head's width from its middle. */
   hangingCentred: 0.2,
@@ -181,9 +203,13 @@ const TAB = {
   sampleSize: 12,
   /** A cut piece with this share of its box inked is a piece of a thick bar. */
   solidShare: 0.8,
+  /** A thin stroke this many spacings long is a stem or a barline, never part of a fret (eraseStems). */
+  stemLength: 2,
   /** A piece narrower than this, in line spacings, whose ink carries on past both its cuts for `strokeReach` is a stroke of a larger glyph. */
   strokeReach: 0.3,
   strokeWidth: 0.4,
+  /** How far, in spacings, a stem's stub is followed past the stem into the fret it hangs from (eraseStems). */
+  stubLength: 0.3,
   thicknessShare: 1 / 400,
 } as const;
 
@@ -218,6 +244,165 @@ export function inkOf(cv: OpenCv, scope: MatScope, page: ColorImage): Mat {
   const ink = scope.keep(new cv.Mat());
   cv.threshold(gray, ink, 0, 1, cv.THRESH_BINARY_INV + cv.THRESH_OTSU);
   return ink;
+}
+
+/**
+ * 1 where the page is darker than half way between the ink threshold and the
+ * paper: what Otsu leaves out of `inkOf` on an enlarged web image, a staff
+ * line spread over five pale rows and the pale stem between two lines
+ * (Marche des élèves, 820 by 1061 enlarged to 3508 rows: lines 162 to 176,
+ * stems 165 to 172, paper 241). Read only to decide whether a group is a
+ * tab, never to read one.
+ */
+export function faintInkOf(
+  cv: OpenCv,
+  scope: MatScope,
+  page: ColorImage
+): Uint8Array {
+  const gray = scope.keep(new cv.Mat());
+  cv.cvtColor(planeToMat(cv, scope, page), gray, cv.COLOR_BGR2GRAY);
+  const ink = scope.keep(new cv.Mat());
+  const threshold = cv.threshold(
+    gray,
+    ink,
+    0,
+    1,
+    cv.THRESH_BINARY_INV + cv.THRESH_OTSU
+  );
+  const data = gray.data as Uint8Array;
+  const histogram = new Uint32Array(256);
+  for (const value of data) {
+    histogram[value] = (histogram[value] ?? 0) + 1;
+  }
+  let paper = 255;
+  let seen = 0;
+  for (let level = 0; level < 256; level += 1) {
+    seen += histogram[level] ?? 0;
+    if (seen >= data.length / 2) {
+      paper = level;
+      break;
+    }
+  }
+  const limit = (threshold + Math.max(paper, threshold)) / 2;
+  return data.map((value) => (value < limit ? 1 : 0));
+}
+
+/**
+ * The line at `y` that only `faint` holds: rows within the gap tolerance
+ * of it whose faint ink covers `faintLineCover` of the group's width. A
+ * staff whose line was too pale for the ink threshold is otherwise a
+ * four-line group, which passes for a mandolin tab on its line count alone
+ * (Le p'tit Sarny's first system, 2026-10-28).
+ */
+function faintLine(
+  faint: Uint8Array,
+  width: number,
+  height: number,
+  group: LineGroup,
+  y: number
+): PageLine | undefined {
+  const reach = TAB.gapTolerance * group.spacing;
+  const span = group.x1 - group.x0 + 1;
+  let y0 = -1;
+  let y1 = -1;
+  for (let row = Math.ceil(y - reach); row <= Math.floor(y + reach); row += 1) {
+    if (row < 0 || row >= height) {
+      continue;
+    }
+    let covered = 0;
+    for (let x = group.x0; x <= group.x1; x += 1) {
+      covered += faint[row * width + x] ?? 0;
+    }
+    if (covered >= TAB.faintLineCover * span) {
+      y0 = y0 < 0 ? row : y0;
+      y1 = row;
+    }
+  }
+  if (y0 < 0) {
+    return;
+  }
+  return {
+    breakLength: 0,
+    x0: group.x0,
+    x1: group.x1,
+    y: (y0 + y1) / 2,
+    y0,
+    y1,
+  };
+}
+
+/** A four-line group made five with a faint line a gap below or above it, or left as it was. */
+function withFaintLine(
+  faint: Uint8Array,
+  width: number,
+  height: number,
+  group: LineGroup
+): LineGroup {
+  if (group.lines.length !== 4) {
+    return group;
+  }
+  const first = group.lines[0] as PageLine;
+  const last = group.lines.at(-1) as PageLine;
+  const below = faintLine(faint, width, height, group, last.y + group.spacing);
+  const above =
+    below === undefined
+      ? faintLine(faint, width, height, group, first.y - group.spacing)
+      : undefined;
+  if (below === undefined && above === undefined) {
+    return group;
+  }
+  const lines =
+    below === undefined
+      ? [above as PageLine, ...group.lines]
+      : [...group.lines, below];
+  return {
+    ...group,
+    lines,
+    spacing:
+      ((lines.at(-1) as PageLine).y - (lines[0] as PageLine).y) /
+      (lines.length - 1),
+  };
+}
+
+/**
+ * Whether a mark is where a stroke crosses a line: narrower than a stroke,
+ * with faint ink in its columns for `strokeReach` on both sides. On an
+ * enlarged web image a stem between two lines is too pale for the ink
+ * threshold and only its crossings stay, each a "1" on a line to the
+ * recogniser: a staff of eighth notes then reads as a tab (Le p'tit Sarny's
+ * second system, 12 of 12 marks read "1", 2026-10-28). A fret stands on
+ * paper above and below, and a fret stacked over another meets the gap
+ * between them.
+ */
+function crossesAsStroke(
+  faint: Uint8Array,
+  width: number,
+  height: number,
+  mark: Mark,
+  spacing: number
+): boolean {
+  if (mark.w >= TAB.strokeWidth * spacing) {
+    return false;
+  }
+  const { w, x: left } = mark;
+  const inked = (y: number) => {
+    if (y < 0 || y >= height) {
+      return false;
+    }
+    for (let x = left; x < left + w; x += 1) {
+      if (faint[y * width + x] === 1) {
+        return true;
+      }
+    }
+    return false;
+  };
+  const reach = Math.max(2, Math.round(TAB.strokeReach * spacing));
+  for (let k = 1; k <= reach; k += 1) {
+    if (!(inked(mark.y - k) && inked(mark.y + mark.h - 1 + k))) {
+      return false;
+    }
+  }
+  return true;
 }
 
 /** Per row, the pixels in long horizontal runs and the x extent of those runs. */
@@ -477,11 +662,34 @@ function finishGroup(
   }
 }
 
+/**
+ * The lines with every pair closer than `minGap` cut to the one with the
+ * shorter longest break: two lines of a system are never that close, so the
+ * other is a beam lying against the line (Reel de Mattawa at 300 dpi: a beam
+ * row two pixels under a staff's top line, 11% of the page wide). Kept, the
+ * beam row stopped the top line starting a group, could not start one itself,
+ * and the staff's other four lines passed for a mandolin tab.
+ */
+function withoutBeamRows(lines: readonly PageLine[]): PageLine[] {
+  const kept: PageLine[] = [];
+  for (const line of lines) {
+    const last = kept.at(-1);
+    if (last === undefined || line.y - last.y >= TAB.minGap) {
+      kept.push(line);
+    } else if (line.breakLength < last.breakLength) {
+      kept[kept.length - 1] = line;
+    }
+  }
+  return kept;
+}
+
 /** Runs of 4 to 6 evenly spaced lines of about one extent; longer runs are not systems. */
 function groupLines(
-  { hidden, lines }: ReturnType<typeof findLines>,
+  found: ReturnType<typeof findLines>,
   pageHeight: number
 ): LineGroup[] {
+  const { hidden } = found;
+  const lines = withoutBeamRows(found.lines);
   const groups: LineGroup[] = [];
   let i = 0;
   while (i < lines.length - 1) {
@@ -544,6 +752,136 @@ function bandOf(
     bottom: Math.min(height - 1, Math.ceil(bottom + below * group.spacing)),
     top: Math.max(0, Math.floor(top - margin * group.spacing)),
   };
+}
+
+/**
+ * The band with its stems erased, in place: ink no wider than a stroke
+ * (strokeWidth spacings) that runs on, a column either side allowed per row
+ * for a pen's slant, over stemLength spacings. A hand's fret is joined to its
+ * stem (Sourwood Mountain's circles hang theirs to a beam under the tab), and
+ * fret and stem make one shape too tall to be a fret; with the stem gone the
+ * fret stands alone. A circle's side is a stroke too, but shorter, and its
+ * top and bottom arcs are wider than one, so a stem stops at the circle.
+ */
+function eraseStems(band: Band, cols: number, spacing: number): void {
+  const { data, rows } = band;
+  const thin = thinInk(
+    band,
+    cols,
+    Math.max(3, Math.round(TAB.strokeWidth * spacing))
+  );
+  const { down, up } = thinRuns(thin, cols, rows);
+  const length = TAB.stemLength * spacing;
+  const erased = new Uint8Array(cols * rows);
+  for (let i = 0; i < data.length; i += 1) {
+    if (thin[i] === 1 && (down[i] ?? 0) + (up[i] ?? 0) - 1 >= length) {
+      data[i] = 0;
+      erased[i] = 1;
+    }
+  }
+  eraseStubs(band, cols, thin, erased, Math.ceil(TAB.stubLength * spacing));
+}
+
+/** 1 on the band's ink in horizontal runs no wider than `maxWidth`. */
+function thinInk(band: Band, cols: number, maxWidth: number): Uint8Array {
+  const { data, rows } = band;
+  const thin = new Uint8Array(cols * rows);
+  for (let y = 0; y < rows; y += 1) {
+    let x = 0;
+    while (x < cols) {
+      if (data[y * cols + x] !== 1) {
+        x += 1;
+        continue;
+      }
+      const start = x;
+      while (x < cols && data[y * cols + x] === 1) {
+        x += 1;
+      }
+      if (x - start <= maxWidth) {
+        thin.fill(1, y * cols + start, y * cols + x);
+      }
+    }
+  }
+  return thin;
+}
+
+/** The longest slanting run of thin ink through each pixel, a column aside allowed per row: down from above, up from below. */
+function thinRuns(
+  thin: Uint8Array,
+  cols: number,
+  rows: number
+): { readonly down: Uint16Array; readonly up: Uint16Array } {
+  const down = new Uint16Array(cols * rows);
+  const up = new Uint16Array(cols * rows);
+  const best = (run: Uint16Array, y: number, x: number) =>
+    Math.max(
+      x > 0 ? (run[y * cols + x - 1] ?? 0) : 0,
+      run[y * cols + x] ?? 0,
+      x + 1 < cols ? (run[y * cols + x + 1] ?? 0) : 0
+    );
+  for (let y = 0; y < rows; y += 1) {
+    for (let x = 0; x < cols; x += 1) {
+      if (thin[y * cols + x] === 1) {
+        down[y * cols + x] = 1 + (y > 0 ? best(down, y - 1, x) : 0);
+      }
+    }
+  }
+  for (let y = rows - 1; y >= 0; y -= 1) {
+    for (let x = 0; x < cols; x += 1) {
+      if (thin[y * cols + x] === 1) {
+        up[y * cols + x] = 1 + (y + 1 < rows ? best(up, y + 1, x) : 0);
+      }
+    }
+  }
+  return { down, up };
+}
+
+/**
+ * A stem's last rows, where it meets the fret, run into the fret's arc and
+ * stop counting as thin a few pixels early: the stub left under a circle
+ * makes it an omega, too tall and off its line. Thin ink touching an erased
+ * stem goes too, row by row, for at most `passes` rows.
+ */
+function eraseStubs(
+  band: Band,
+  cols: number,
+  thin: Uint8Array,
+  erased: Uint8Array,
+  passes: number
+): void {
+  const { data, rows } = band;
+  const touchesErased = (y: number, x: number) =>
+    [-1, 0, 1].some((dx) =>
+      [-1, 1].some((dy) => {
+        const yy = y + dy;
+        const xx = x + dx;
+        return (
+          yy >= 0 &&
+          yy < rows &&
+          xx >= 0 &&
+          xx < cols &&
+          erased[yy * cols + xx] === 1
+        );
+      })
+    );
+  for (let pass = 0; pass < passes; pass += 1) {
+    const next: number[] = [];
+    for (let y = 0; y < rows; y += 1) {
+      for (let x = 0; x < cols; x += 1) {
+        const i = y * cols + x;
+        if (data[i] === 1 && thin[i] === 1 && touchesErased(y, x)) {
+          next.push(i);
+        }
+      }
+    }
+    if (next.length === 0) {
+      return;
+    }
+    for (const i of next) {
+      data[i] = 0;
+      erased[i] = 1;
+    }
+  }
 }
 
 /**
@@ -820,6 +1158,15 @@ const PRINTED_MARK: MarkSize = {
 export const READ_MARK: MarkSize = { maxHeight: 1.3, maxWidth: 1.35 };
 
 /**
+ * A system found by the hand-written second chance: a hand's frets reach two
+ * spacings (Sourwood Mountain's circles are 1.9 to 2.1 tall and wide), hung on
+ * stems that eraseStems removes first. Printed systems never take this size:
+ * their stem-hanging frets are cut by fretSized's own rules (Billy in the
+ * Lowground, Old Joe Clark lost bars when they did).
+ */
+export const HAND_MARK: MarkSize = { maxHeight: 2.2, maxWidth: 2.4 };
+
+/**
  * The band's components of a fret's size. On a system whose frets hang
  * their stems (at least two do), the components too big to be a fret are
  * cut between the lines (cutBetweenLines) and their pieces grown back over
@@ -913,6 +1260,9 @@ export function marksOf(
   const s = group.spacing;
   const band = bandWithoutLines(ink, width, height, group);
   const cols = group.x1 - group.x0 + 1;
+  if (size === HAND_MARK) {
+    eraseStems(band, cols, s);
+  }
   const onLines: Mark[] = [];
   for (const box of fretSized(cv, band, cols, group, size)) {
     const y = box.y + band.top;
@@ -959,6 +1309,68 @@ export function marksOf(
     marks: merged.filter(tall),
     short: merged.filter((m) => !tall(m)),
   };
+}
+
+/**
+ * A five-line group's marks at a hand's size (HAND_MARK), when they sit on its
+ * lines as a tab's frets do: at least minDigits on lines, and in its spaces at
+ * most handInSpaceShare of that, which a staff's noteheads never manage.
+ * Undefined otherwise. Sourwood Mountain's zeros are circles 1.4 spacings
+ * wide, over a printed fret's size.
+ */
+function handWrittenMarks(
+  cv: OpenCv,
+  ink: Uint8Array,
+  width: number,
+  height: number,
+  group: LineGroup
+): Mark[] | undefined {
+  const s = group.spacing;
+  const band = bandWithoutLines(ink, width, height, group);
+  const cols = group.x1 - group.x0 + 1;
+  eraseStems(band, cols, s);
+  const ys = group.lines.map((line) => line.y);
+  let onLines = 0;
+  let inSpaces = 0;
+  for (const box of fretSized(cv, band, cols, group, HAND_MARK)) {
+    const centre = box.y + band.top + box.h / 2;
+    const toLine = Math.min(...ys.map((y) => Math.abs(y - centre)));
+    const toSpace = Math.min(
+      ...ys.slice(1).map((y, k) => Math.abs((y + (ys[k] ?? y)) / 2 - centre))
+    );
+    if (toLine <= TAB.onLine * s) {
+      onLines += 1;
+    } else if (toSpace <= TAB.onLine * s) {
+      inSpaces += 1;
+    }
+  }
+  if (onLines < TAB.minDigits || inSpaces > TAB.handInSpaceShare * onLines) {
+    return;
+  }
+  return marksOf(cv, ink, width, height, group, HAND_MARK).marks;
+}
+
+/**
+ * The page's ink with the tab's lines erased over its band, so a crop of a
+ * number the line runs through shows the number alone: the recogniser reads
+ * "12" with a line across it as "2".
+ */
+export function inkWithoutLines(
+  ink: Uint8Array,
+  width: number,
+  height: number,
+  group: LineGroup
+): Uint8Array {
+  const band = bandWithoutLines(ink, width, height, group);
+  const cols = group.x1 - group.x0 + 1;
+  const out = ink.slice();
+  for (let y = 0; y < band.rows; y += 1) {
+    out.set(
+      band.data.subarray(y * cols, (y + 1) * cols),
+      (y + band.top) * width + group.x0
+    );
+  }
+  return out;
 }
 
 /** The mark's own ink on white, padded, so the recogniser sees a bare number. */
@@ -1119,18 +1531,50 @@ export async function detectTablature(
 ): Promise<DetectedTab[]> {
   const groups = withMatScope((scope) => {
     const ink = new Uint8Array(inkOf(cv, scope, page).data);
+    const faint = faintInkOf(cv, scope, page);
     return groupLines(findLines(ink, page.width, page.height), page.height).map(
-      (group): Candidate => {
-        const { marks } = marksOf(cv, ink, page.width, page.height, group);
+      (found): Candidate => {
+        const group = withFaintLine(faint, page.width, page.height, found);
+        const marks = marksOf(
+          cv,
+          ink,
+          page.width,
+          page.height,
+          group
+        ).marks.filter(
+          (mark) =>
+            !crossesAsStroke(
+              faint,
+              page.width,
+              page.height,
+              mark,
+              group.spacing
+            )
+        );
         const knockedOut = knockedOutShare(ink, page.width, group, marks);
         if (group.lines.length !== 5) {
           return { evidence: "tab", group, knockedOut };
         }
+        if (marks.length >= TAB.minDigits) {
+          return {
+            evidence: marks.map((mark) =>
+              cropOf(page, ink, mark, group.spacing)
+            ),
+            group,
+            knockedOut,
+          };
+        }
+        const hand = handWrittenMarks(cv, ink, page.width, page.height, group);
+        const lineless =
+          hand === undefined
+            ? ink
+            : inkWithoutLines(ink, page.width, page.height, group);
         return {
+          ...(hand === undefined ? {} : { hand: true }),
           evidence:
-            marks.length < TAB.minDigits
+            hand === undefined
               ? "staff"
-              : marks.map((mark) => cropOf(page, ink, mark, group.spacing)),
+              : hand.map((mark) => cropOf(page, lineless, mark, group.spacing)),
           group,
           knockedOut,
         };
@@ -1148,8 +1592,9 @@ export async function detectTablature(
       candidates.push(candidate);
     }
   }
-  return keepPrintedAlike(candidates).map(({ group }, index) => ({
+  return keepPrintedAlike(candidates).map(({ group, hand }, index) => ({
     group,
+    ...(hand === true ? { hand } : {}),
     system: toSystem(group, index, page.width, page.height),
   }));
 }

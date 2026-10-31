@@ -36,6 +36,7 @@ import {
   type ReadCrops,
   whitenTablature,
 } from "../tab/detect.js";
+import { type ClassifyDigits, classifyDigits } from "../tab/digits.js";
 import { glyphsOf, linesIn, type PageTextItem } from "../tab/layer.js";
 import { readTablature, type TabReading } from "../tab/read.js";
 import { readTabText, type TabText } from "../tab/text.js";
@@ -176,7 +177,7 @@ async function readPageText(
  */
 const TAB_MARGIN = 0.75;
 
-/** RapidOCR's recogniser, opened on the first five-line group that needs it, read text only. */
+/** RapidOCR's recogniser, opened on the first line group that needs it, read text only. */
 function digitReader(
   engine: RecognizeEngine,
   signal: AbortSignal | undefined
@@ -195,6 +196,20 @@ function digitReader(
     signal?.throwIfAborted();
     const read = await recognizeCrops(engine.cv, session, characters, crops);
     return read.map((text) => text.text);
+  };
+}
+
+/** The tab digit classifier, opened on the first tab read off the page's ink. */
+function digitClassifier(
+  engine: RecognizeEngine,
+  signal: AbortSignal | undefined
+): ClassifyDigits {
+  let opened: Promise<ModelSession> | undefined;
+  return async (crops) => {
+    opened ??= engine.open("tabDigits", undefined, signal);
+    const session = await opened;
+    signal?.throwIfAborted();
+    return await classifyDigits(session, crops);
   };
 }
 
@@ -336,18 +351,27 @@ export async function recognizePage(
   let tablature: TabReading[] = [];
   try {
     options.signal?.throwIfAborted();
-    const read = digitReader(engine, options.signal);
-    const tabs: DetectedTab[] = await detectTablature(engine.cv, page, read);
+    const tabs: DetectedTab[] = await detectTablature(
+      engine.cv,
+      page,
+      digitReader(engine, options.signal)
+    );
     const reportTab = (done: number) =>
       options.onProgress?.({ done, stage: "tab", total: tabs.length + 1 });
     tablature = await readTablature(
       engine.cv,
       page,
       tabs,
-      read,
+      digitReader(engine, options.signal),
       reportTab,
-      options.textLayer
+      options.textLayer,
+      digitClassifier(engine, options.signal)
     );
+    // Only a system the tab reader read notes on is painted out: one it
+    // read nothing on gives the caller nothing, and if the guard was wrong
+    // it is a staff homr can still read (Reel de Mattawa, 0.5.2: two staves
+    // taken for four-line tabs, read as 0 events and painted white).
+    const read = tabs.filter((_, k) => (tablature[k]?.events.length ?? 0) > 0);
     if (hasTabs(tablature)) {
       const texts = await readTabTextOrNothing(
         engine,
@@ -358,14 +382,15 @@ export async function recognizePage(
       );
       reportTab(tabs.length + 1);
       tablature = tablature.map((system, k) => ({ ...system, ...texts[k] }));
+      const kept = tabs.length - read.length;
       log.push(
-        `Tab guard: ${tabs.length} tablature systems (${tablature.map((t) => t.lines).join(", ")} lines) painted out`,
+        `Tab guard: ${tabs.length} tablature systems (${tablature.map((t) => t.lines).join(", ")} lines), ${read.length} painted out${kept === 0 ? "" : `, ${kept} with no event left to the staff reader`}`,
         `Tab reader: ${tablature.map((t) => t.events.length).join(", ")} events`,
         `Tab text: ${tablature.map(describeTabText).join("; ")}`
       );
     }
     const reading = await readPage(
-      tabs.length === 0 ? page : whitenTablature(page, tabs, TAB_MARGIN),
+      read.length === 0 ? page : whitenTablature(page, read, TAB_MARGIN),
       engine,
       log,
       options

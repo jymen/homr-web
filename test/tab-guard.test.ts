@@ -303,4 +303,39 @@ describeWithModels("recognizePage behind the tab guard", () => {
     },
     PAGE_TIMEOUT_MS
   );
+
+  it(
+    "paints out only the systems it read notes on, and says so",
+    async () => {
+      const cv = await testOpenCv();
+      const store = await storeOn(CPU);
+      try {
+        const result = await recognizePage(
+          drawPage(cv, [
+            { kind: "tab", lines: 5, spacing: TAB, top: 300 },
+            { empty: true, kind: "tab", lines: 4, spacing: TAB, top: 700 },
+          ]),
+          {
+            backend: "wasm",
+            cv,
+            open: (role, batch) =>
+              store.open(role, batch === undefined ? {} : { batch }),
+          },
+          { ocr: false }
+        );
+        // The empty four-line group passes for a tab on its line count; with
+        // no event read on it, it is left on the page for the staff reader.
+        expect(result.tablature.map((t) => t.events.length > 0)).toEqual([
+          true,
+          false,
+        ]);
+        expect(result.log).toContain(
+          "Tab guard: 2 tablature systems (5, 4 lines), 1 painted out, 1 with no event left to the staff reader"
+        );
+      } finally {
+        await store.close();
+      }
+    },
+    PAGE_TIMEOUT_MS
+  );
 });

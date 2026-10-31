@@ -1,7 +1,7 @@
 /**
  * Which file each model role uses, on which execution provider, and which of
  * its outputs are left in GPU buffers. Two tables and one derivation: the
- * artifacts between the markers are measured facts about the nine files on
+ * artifacts between the markers are measured facts about the ten files on
  * disk, written by tools/gen-manifest.mjs; MODEL_ROLES above them is
  * hand-written policy, one row per role, each citing homr's source.
  *
@@ -18,7 +18,7 @@ import { ModelError } from "./errors.js";
 export const EXECUTION_PROVIDERS = ["wasm", "webgpu"] as const;
 export type ExecutionProvider = (typeof EXECUTION_PROVIDERS)[number];
 
-/** The three ONNX element types the nine artifacts use. Narrowed on purpose: a fourth means the generator saw something new and the design should be looked at. */
+/** The three ONNX element types the ten artifacts use. Narrowed on purpose: a fourth means the generator saw something new and the design should be looked at. */
 export type TensorElementType = "float16" | "float32" | "int64";
 
 /**
@@ -50,7 +50,7 @@ export interface ArtifactRecord {
 }
 
 /**
- * The nine files, by a label that names the model, its homr version and its
+ * The ten files, by a label that names the model, its homr version and its
  * precision. The precision lives in the id and not in a field: the
  * load-bearing fact is the measured element type on each TensorSpec, and a
  * `precision` field would answer "which file" and "what do I write into the
@@ -59,7 +59,8 @@ export interface ArtifactRecord {
  * There is no decoder-396-fp16 row. homr's release has one and uses it on CUDA
  * only, fused, so the WebGPU EP cannot run it; a row nothing can reach goes
  * stale silently. decoder-396-web-fp16 is this port's own re-export, reached
- * through WEBGPU_DECODER_CATALOG.
+ * through WEBGPU_DECODER_CATALOG. tab-digits-1 is this port's own model, not
+ * homr's: tools/train-tab-digits.sh trains it.
  */
 export const ARTIFACT_IDS = [
   "decoder-396-fp32",
@@ -71,6 +72,7 @@ export const ARTIFACT_IDS = [
   "ppocr-v6-rec-small",
   "segnet-308-fp16",
   "segnet-308-fp32",
+  "tab-digits-1",
 ] as const;
 
 export type ArtifactId = (typeof ARTIFACT_IDS)[number];
@@ -83,6 +85,7 @@ export const MODEL_ROLE_NAMES = [
   "ocrDetect",
   "ocrRecognize",
   "segnet",
+  "tabDigits",
 ] as const;
 
 export type ModelRole = (typeof MODEL_ROLE_NAMES)[number];
@@ -179,6 +182,15 @@ export const MODEL_ROLES = {
       artifact: "segnet-308-fp16",
       keepOutputsOnGpu: [],
       kind: "gpu",
+    },
+  },
+  // This project's own handwritten-digit classifier for tab frets
+  // (src/tab/digits.ts, tools/train-tab-digits.sh), fp32 only.
+  tabDigits: {
+    cpu: "tab-digits-1",
+    onWebgpu: {
+      kind: "stay-on-cpu",
+      why: "a half-megabyte classifier run on a few dozen crops a system costs less on wasm than one WebGPU dispatch",
     },
   },
 } as const satisfies Readonly<Record<ModelRole, RolePolicy>>;
@@ -862,6 +874,15 @@ export const ARTIFACTS = {
     sha256: "6ed36640db4ef5d223098b6d5efe4eda97c66b24a2c72faab8a018c749003a8d",
     urlPath:
       "6ed36640db4ef5d223098b6d5efe4eda97c66b24a2c72faab8a018c749003a8d/segnet_308-3296ccd40960f90ca6ab9c035cca945675d30a0f.onnx",
+  },
+  "tab-digits-1": {
+    batchDim: "n",
+    bytes: 471_919,
+    inputs: [{ name: "x", shape: ["n", 1, 28, 28], type: "float32" }],
+    outputs: [{ name: "logits", shape: ["n", 11], type: "float32" }],
+    sha256: "037fac028e121b4d133e5f6bcd1099a1914e692e68ed90f7d3e1bb94d5bdcda3",
+    urlPath:
+      "037fac028e121b4d133e5f6bcd1099a1914e692e68ed90f7d3e1bb94d5bdcda3/tab-digits-037fac028e12.onnx",
   },
 } as const satisfies Readonly<Record<ArtifactId, ArtifactRecord>>;
 

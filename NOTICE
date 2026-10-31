@@ -31,3 +31,17 @@ The chord and title OCR ports parts of two more works:
 - Clipper 6.4.2 by Angus Johnson, http://www.angusj.com/delphi/clipper.php,
   Boost Software Licence 1.0: the polygon offset with round joins
   (src/ocr/clipper-offset.ts).
+
+The tab digit classifier (models/tab-digits-*.onnx, src/tab/digits.ts) is
+this project's own model, trained by tools/train-tab-digits.sh on:
+
+- the MNIST database of handwritten digits, by Yann LeCun, Corinna Cortes
+  and Christopher J.C. Burges, itself derived from NIST Special Databases 1
+  and 3, made available under the Creative Commons Attribution-Share Alike
+  3.0 licence (https://creativecommons.org/licenses/by-sa/3.0/);
+- crops of the tablature pages typeset for this repository
+  (test/fixtures/tab/), which carry no third-party rights.
+
+The trained weights are released under the same Creative Commons
+Attribution-Share Alike 3.0 licence, with this attribution; the code that
+trains and runs them is under this repository's licence.
