@@ -36,7 +36,15 @@ export type Drawn =
       readonly empty?: boolean;
       readonly top: number;
     }
-  | { readonly kind: "staff"; readonly spacing: number; readonly top: number };
+  | { readonly kind: "staff"; readonly spacing: number; readonly top: number }
+  | {
+      /** Polylines drawn as a pen draws them, over whatever else is on the page. */
+      readonly kind: "strokes";
+      readonly strokes: readonly {
+        readonly points: readonly (readonly [number, number])[];
+        readonly thickness: number;
+      }[];
+    };
 
 function drawLines(
   cv: OpenCv,
@@ -166,6 +174,19 @@ function drawNotes(cv: OpenCv, page: Mat, top: number, spacing: number): void {
   }
 }
 
+function drawStrokes(
+  cv: OpenCv,
+  page: Mat,
+  strokes: Extract<Drawn, { kind: "strokes" }>["strokes"]
+): void {
+  for (const { points, thickness } of strokes) {
+    for (const [k, [x, y]] of points.slice(1).entries()) {
+      const [px, py] = points[k] ?? [x, y];
+      cv.line(page, new cv.Point(px, py), new cv.Point(x, y), BLACK, thickness);
+    }
+  }
+}
+
 function toColorImage(page: Mat): ColorImage {
   const rgba = page.data;
   const bgr = new Uint8Array(PAGE_WIDTH * PAGE_HEIGHT * 3);
@@ -183,7 +204,9 @@ export function drawPage(cv: OpenCv, systems: readonly Drawn[]): ColorImage {
       new cv.Mat(PAGE_HEIGHT, PAGE_WIDTH, cv.CV_8UC4, new cv.Scalar(...WHITE))
     );
     for (const system of systems) {
-      if (system.kind === "tab") {
+      if (system.kind === "strokes") {
+        drawStrokes(cv, page, system.strokes);
+      } else if (system.kind === "tab") {
         drawLines(cv, page, system.top, system.lines, system.spacing, system);
         if (system.empty === true) {
           continue;

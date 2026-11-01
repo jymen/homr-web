@@ -461,3 +461,69 @@ describe("barsOf", () => {
     ]);
   });
 });
+
+describe("notes whose fret was not read", () => {
+  const ANSWERS = { instrument: "banjo5", tuning: BANJO_G } as const;
+  /** A 4/4 bar of eight eighths, the fourth drawn with its stem and beam and its fret unread. */
+  function withUnread(over: Partial<TabReading> = {}): TabReading {
+    at = 0;
+    const opening = bar();
+    const events = [ev(E, [3, 4]), ev(E, [2, 0]), ev(E, [1, 0])];
+    at += 0.02;
+    const unreadX = at;
+    events.push(ev(E, [1, 0]), ev(E, [2, 0]), ev(E, [3, 2]), ev(E, [1, 0]));
+    const closing = bar();
+    return system({
+      barlines: [opening, closing],
+      events,
+      timeSignature: { den: 4, num: 4, text: "4/4" },
+      unreadFrets: [
+        {
+          reason: "stem_without_fret",
+          stem: E,
+          string: 5,
+          text: "u",
+          x: unreadX,
+        },
+      ],
+      ...over,
+    });
+  }
+
+  it("count in their bar's time, so the bar sums to the meter", () => {
+    const p = tabPrerequisites([withUnread()], ANSWERS);
+    expect(p.bars.map((b) => [b.read, b.fits, b.unreadFrets])).toEqual([
+      [4, true, 1],
+    ]);
+    expect(p.durations.status).toBe("read");
+  });
+
+  it("stand in the tune in their place, with the string and text read over the stem", () => {
+    const r = resolveTab([withUnread()], ANSWERS);
+    expect(r.ok).toBe(true);
+    if (!r.ok) {
+      return;
+    }
+    const [only] = r.tune.bars;
+    expect(only?.events).toHaveLength(7);
+    expect(only?.unread).toEqual([
+      {
+        before: 3,
+        duration: { dots: 0, value: "eighth" },
+        index: 0,
+        string: 5,
+        system: 0,
+        text: "u",
+      },
+    ]);
+  });
+
+  it("change nothing for a reading without them: the bar is an eighth short", () => {
+    const { unreadFrets: _unread, ...plain } = withUnread();
+    const p = tabPrerequisites([plain], ANSWERS);
+    expect(p.bars.map((b) => [b.read, b.fits, b.unreadFrets])).toEqual([
+      [3.5, false, undefined],
+    ]);
+    expect(barsOf([withUnread()])[0]?.unread).toEqual([0]);
+  });
+});

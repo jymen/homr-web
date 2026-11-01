@@ -88,8 +88,11 @@ A system is a run of four to six evenly spaced horizontal lines (a beam row
 lying within a few pixels of a line is not counted as a line). Four or six
 lines is a tab; five lines is a tab when the marks sitting on its lines read
 as numbers, which RapidOCR's recogniser decides from a sample of at most
-twelve of them. A page with no tab, and no five-line group carrying such
-marks, never loads the recogniser. Detection is measured on 15 pages at 300
+twelve of them. Once two five-line groups on a page read as tabs, another
+five-line group at their line spacing whose marks stand on its lines, not
+in its spaces, is a tab too (a hand writes some lines with too few
+printed-size digits to pass). A page with no tab, and no five-line group
+carrying such marks, never loads the recogniser. Detection is measured on 15 pages at 300
 dpi (banjo, mandolin and guitar PDFs, one of them a scan), 56 tab systems out
 of 56; it finds nothing on a low-resolution phone photograph (lines 5 px
 apart), where homr reads the tab as before.
@@ -147,6 +150,26 @@ equal frets with no letter is a tie. Stems are read below the tab, where
 TablEdit, Guitar Pro, LilyPond and Peghead Nation hang them; rests, tuplets
 and stems drawn above the tab are not read yet (docs/design/tab-4-findings.md).
 
+A note the page draws whose fret could not be read is never made up and never
+dropped. When a stem with its beam hangs under the tab and no fret was read
+above it (a hand's 1 drawn as a tick, a 5 read as "S", a fret Guitar Pro
+leaves out at a tied note), the system lists it in `unreadFrets`, apart from
+`events` so event indices and the answers that name them do not move:
+
+```ts
+for (const tab of result.tablature) {
+  tab.unreadFrets; // [{ x, stem, reason: "stem_without_fret", string?, text? }] or undefined
+}
+```
+
+`string` is the line of a mark standing over the stem that read as no fret,
+and `text` what the recogniser made of it ("u", "S", "1"); both are absent
+when nothing stands there. A stem under a dead note's `x` is that note's and
+is not listed. Such a note keeps its time: its bar sums with it, and the tune
+holds it in `TabTuneBar.unread` (below) for the app to show as "?" until the
+musician gives the fret. An app that does not read `unread` writes those
+bars a note short.
+
 #### From a tab to a tune
 
 Turning a tab into a tune needs five facts first, by design. Positions become
@@ -172,8 +195,13 @@ const second = resolveTab(result.tablature, {
 });
 if (second.ok) {
   second.tune.bars; // [{ events: [{ duration, notes: [{ string, fret, midi, techniques, tieToNext, tieFromPrevious }], graces }], repeatStart, repeatEnd, pickup, systemBreakBefore }]
+  second.tune.bars[0].unread; // [{ before, duration, index, system, string?, text? }] or undefined: notes whose fret was not read
 }
 ```
+
+An unread note stands before the bar's `events[before]` (`events.length` at
+the bar's end); `index` points into its system's `unreadFrets`, and a bar
+check counts it in `read` and in `unreadFrets`.
 
 `prerequisites` on either answer holds all five as `{ status: "read",
 value, source, confidence, evidence }`, `{ status: "assumed", value,

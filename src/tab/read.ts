@@ -33,6 +33,7 @@ import { glyphsOf, onLines, type PageTextItem, textIn } from "./layer.js";
 import {
   type FretColumn,
   rhythmGeometry,
+  type StrayStem,
   type TabBarline,
   type TabStem,
 } from "./rhythm.js";
@@ -58,6 +59,23 @@ export interface TabPlacedEvent {
 export interface TabEvent extends TabPlacedEvent {
   readonly grace: boolean;
   readonly stem: TabStem;
+}
+
+/**
+ * A note the page draws whose fret was not read: a stem with its beam under
+ * the tab and no fret read above it. The library never makes a fret up: the
+ * app shows a "?" for the musician to fill in, and the note keeps its time in
+ * its bar. `string` is the line of a mark standing over the stem that read
+ * as no fret, and `text` what the recogniser made of that mark, when there
+ * is one.
+ */
+export interface TabUnreadFret {
+  readonly reason: "stem_without_fret";
+  readonly stem: TabStem;
+  readonly string?: number;
+  readonly text?: string;
+  /** Page-normalised, the stem's column at its top, where the fret stands. */
+  readonly x: number;
 }
 
 export const TAB_SLUR_KINDS = [
@@ -132,6 +150,13 @@ export interface TabReading extends TabSystem {
   readonly timeSignature?: TabTimeSignature;
   readonly tuning?: TabTuning;
   readonly unread: number;
+  /**
+   * Notes whose fret was not read, left to right, standing between `events`
+   * by their `x`; absent when there is none. Kept apart from `events`, whose
+   * every entry has a fret, so event indices and the answers that name them
+   * are unchanged.
+   */
+  readonly unreadFrets?: readonly TabUnreadFret[];
 }
 
 /**
@@ -277,6 +302,8 @@ function joinWords(
 interface Placement {
   readonly annotations: TabAnnotation[];
   readonly frets: PlacedFret[];
+  /** Marks read as no fret: unread, technique letters, and short marks that are no technique. */
+  readonly loose: ReadMark[];
   readonly unread: number;
 }
 
@@ -295,6 +322,7 @@ function placementOf(
   const { short, tall } = joinWords(tallMarks, shortMarks, tab.group.spacing);
   const frets: PlacedFret[] = [];
   const annotations: TabAnnotation[] = [];
+  const loose: ReadMark[] = [];
   let unread = 0;
   const annotate = (mark: Mark, technique: TabTechnique) =>
     annotations.push({
@@ -306,10 +334,14 @@ function placementOf(
     const reading = readMark(text);
     if (reading.kind === "unread") {
       unread += 1;
+      loose.push({ mark, text });
       continue;
     }
     if (reading.technique !== undefined) {
       annotate(mark, reading.technique);
+    }
+    if (reading.kind === "technique") {
+      loose.push({ mark, text });
     }
     if (reading.kind === "fret") {
       frets.push({
@@ -323,10 +355,12 @@ function placementOf(
     const reading = readMark(text);
     if (reading.kind === "technique") {
       annotate(mark, reading.technique);
+    } else {
+      loose.push({ mark, text });
     }
   }
   annotations.sort((a, b) => a.x - b.x || a.string - b.string);
-  return { annotations, frets, unread };
+  return { annotations, frets, loose, unread };
 }
 
 /** The slur letters the reader knows, as printed beside an arc: TablEdit's Po and Sl, Peghead Nation's capitals, LilyPond's lowercase. */
@@ -515,6 +549,23 @@ export async function readTablature(
         to: slur.to,
       };
     });
+    // A stem under a dead note's "x" is that note's (Moon over Shanghai): it
+    // is read, not unread, and is not reported here. Other letters stand
+    // beside a fret, and a hand's 5 can read as an S.
+    const lettered = (stray: StrayStem) =>
+      placement.annotations.some(
+        (a) =>
+          a.technique === "x" &&
+          Math.abs(a.x * page.width - stray.x) <=
+            UNREAD_REACH * tab.group.spacing &&
+          (tab.group.lines[a.string - 1]?.y ?? Number.POSITIVE_INFINITY) <
+            stray.top
+      );
+    const unreadFrets = geometry.strays
+      .filter((stray) => !lettered(stray))
+      .map((stray) =>
+        unreadFretOf(stray, placement.loose, tab.group.spacing, page.width)
+      );
     readings.push({
       ...tab.system,
       annotations: placement.annotations,
@@ -528,10 +579,41 @@ export async function readTablature(
       slurs,
       ...(time === undefined ? {} : { timeSignature: time }),
       unread: placement.unread,
+      ...(unreadFrets.length === 0 ? {} : { unreadFrets }),
     });
     onSystem?.(readings.length, tabs.length);
   }
   return readings;
+}
+
+/** A mark standing over a stray stem's top within this many line spacings across names its string. */
+const UNREAD_REACH = 0.5;
+
+/**
+ * A stray stem as a note whose fret was not read, with the string and text of
+ * the lowest mark over it that read as no fret, if any.
+ */
+function unreadFretOf(
+  stray: StrayStem,
+  loose: readonly ReadMark[],
+  spacing: number,
+  pageWidth: number
+): TabUnreadFret {
+  const [over] = loose
+    .filter(
+      ({ mark }) =>
+        Math.abs(mark.x + mark.w / 2 - stray.x) <= UNREAD_REACH * spacing &&
+        mark.y + mark.h / 2 < stray.top
+    )
+    .sort((a, b) => b.mark.y - a.mark.y);
+  const text = over?.text.trim() ?? "";
+  return {
+    reason: "stem_without_fret",
+    stem: stray.stem,
+    ...(over === undefined ? {} : { string: over.mark.line + 1 }),
+    ...(text === "" ? {} : { text }),
+    x: stray.x / pageWidth,
+  };
 }
 
 /** Grace frets stand under this share of the system's median fret height. */
@@ -569,15 +651,24 @@ async function placementByRecogniser(
   read: ReadCrops,
   classify: ClassifyDigits | undefined
 ): Promise<Placement> {
+  // A fret over its lines may have a stroke turning along one; a knocked-out fret never does.
+  const jogs = tab.knocksOut !== true;
   const { marks, short } = marksOf(
     cv,
     ink,
     page.width,
     page.height,
     tab.group,
-    tab.hand === true ? HAND_MARK : READ_MARK
+    tab.hand === true ? HAND_MARK : READ_MARK,
+    jogs
   );
-  const lineless = inkWithoutLines(ink, page.width, page.height, tab.group);
+  const lineless = inkWithoutLines(
+    ink,
+    page.width,
+    page.height,
+    tab.group,
+    jogs
+  );
   const readAll = async (
     list: readonly Mark[],
     fuse: ClassifyDigits | undefined

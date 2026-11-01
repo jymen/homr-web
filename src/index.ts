@@ -38,6 +38,7 @@ export type {
   TabTechnique,
   TabTimeSignature,
   TabTuning,
+  TabUnreadFret,
   TuningSource,
 } from "./result.js";
 export { BACKENDS, PROGRESS_STAGES, RECOGNIZE_ERRORS } from "./result.js";
@@ -63,6 +64,7 @@ export type {
   TabTuneBar,
   TabTuneEvent,
   TabTuneNote,
+  TabTuneUnread,
   TimeSignature,
 } from "./tab/tune.js";
 export {

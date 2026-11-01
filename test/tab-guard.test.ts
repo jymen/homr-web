@@ -11,6 +11,8 @@ import { ctcCharacters } from "../src/ocr/ctc.js";
 import { recognizeCrops } from "../src/ocr/rapid-ocr.js";
 import { recognizePage } from "../src/pipeline/recognize.js";
 import {
+  bandWithoutLines,
+  componentBoxes,
   detectTablature,
   inkOf,
   isFretText,
@@ -19,6 +21,7 @@ import {
   type ReadCrops,
   whitenTablature,
 } from "../src/tab/detect.js";
+import { readTablature } from "../src/tab/read.js";
 import { CPU, describeWithModels, storeOn } from "./support/models.js";
 import { testOpenCv } from "./support/opencv.js";
 import {
@@ -238,6 +241,247 @@ describeWithModels("detectTablature with RapidOCR's recogniser", () => {
       );
       expect(tabs.map((t) => t.system.lines)).toEqual([4, 5, 6]);
     });
+  });
+});
+
+describe("five-line groups drawn like the page's five-line tabs", () => {
+  const fiveLineTabs: readonly Drawn[] = [
+    { kind: "tab", lines: 5, spacing: TAB, top: 250 },
+    { kind: "tab", lines: 5, spacing: TAB, top: 550 },
+  ];
+
+  it("takes a refused five-line group of the tabs' line spacing once two five-line tabs read as numbers", async () => {
+    const tabs = await detect(
+      [
+        ...fiveLineTabs,
+        { empty: true, kind: "tab", lines: 5, spacing: TAB, top: 850 },
+      ],
+      answering("7").read
+    );
+    expect(tabs.map((t) => t.system.lines)).toEqual([5, 5, 5]);
+    expect(tabs[2]?.system.cy).toBeCloseTo((850 + 2 * TAB) / PAGE_HEIGHT, 2);
+  });
+
+  it("does not take it beside a single five-line tab", async () => {
+    const tabs = await detect(
+      [
+        fiveLineTabs[0] as Drawn,
+        { empty: true, kind: "tab", lines: 5, spacing: TAB, top: 850 },
+      ],
+      answering("7").read
+    );
+    expect(tabs).toHaveLength(1);
+  });
+
+  it("does not take a group of another line spacing", async () => {
+    const tabs = await detect(
+      [
+        ...fiveLineTabs,
+        { empty: true, kind: "tab", lines: 5, spacing: 15, top: 850 },
+      ],
+      answering("7").read
+    );
+    expect(tabs).toHaveLength(2);
+  });
+
+  it("does not take a staff of the tabs' line spacing: its noteheads stand in its spaces", async () => {
+    const tabs = await detect(
+      [...fiveLineTabs, { kind: "staff", spacing: TAB, top: 850 }],
+      answering("7").read
+    );
+    expect(tabs).toHaveLength(2);
+  });
+});
+
+describe("reading the marks of a hand", () => {
+  const top = 400;
+  const line = (k: number) => top + k * TAB;
+
+  const readMarks = async (systems: readonly Drawn[], jogs = false) => {
+    const cv = await testOpenCv();
+    const page = drawPage(cv, systems);
+    const [tab] = await detectTablature(cv, page, unreachable);
+    if (tab === undefined) {
+      throw new Error("the four-line tab was not found");
+    }
+    const ink = withMatScope(
+      (scope) => new Uint8Array(inkOf(cv, scope, page).data)
+    );
+    return marksOf(
+      cv,
+      ink,
+      page.width,
+      page.height,
+      tab.group,
+      READ_MARK,
+      jogs
+    );
+  };
+
+  it("takes no piece of a pen's stem for a fret: a stem a little wider at its top has no head", async () => {
+    // Stems from the second line down past the tab, five pixels wide for
+    // 0.6 spacing then three, leaning: they used to pass for frets hanging
+    // their stems, which cut every stem between the lines.
+    const xs = [200, 330, 460, 590, 720, 850];
+    const stems = xs.map((x) => ({
+      points: [
+        [x, line(1)],
+        [x + 3, line(1) + Math.round(0.6 * TAB)],
+      ] as const,
+      thickness: 3,
+    }));
+    const tails = xs.map((x) => ({
+      points: [
+        [x + 3, line(1) + Math.round(0.6 * TAB)],
+        [x + 7, line(3) + 3 * TAB],
+      ] as const,
+      thickness: 2,
+    }));
+    const { marks, short } = await readMarks([
+      { empty: true, kind: "tab", lines: 4, spacing: TAB, top },
+      { kind: "strokes", strokes: [...stems, ...tails] },
+    ]);
+    expect(marks).toEqual([]);
+    expect(short).toEqual([]);
+  });
+
+  it("keeps a 5 whole whose bowl starts a pen's width along the line from its stroke", async () => {
+    // The stroke comes down to the third line; the bowl leaves it five
+    // pixels to the right, going down (strokes three pixels wide).
+    const x = 600;
+    const y = line(2);
+    const cv = await testOpenCv();
+    const page = drawPage(cv, [
+      { empty: true, kind: "tab", lines: 4, spacing: TAB, top },
+      {
+        kind: "strokes",
+        strokes: [
+          {
+            points: [
+              [x + 10, y - 10],
+              [x, y - 10],
+              [x, y - 1],
+            ],
+            thickness: 2,
+          },
+          {
+            points: [
+              [x + 5, y + 1],
+              [x + 10, y + 3],
+              [x + 10, y + 7],
+              [x + 2, y + 9],
+            ],
+            thickness: 2,
+          },
+        ],
+      },
+    ]);
+    const [tab] = await detectTablature(cv, page, unreachable);
+    if (tab === undefined) {
+      throw new Error("the four-line tab was not found");
+    }
+    const ink = withMatScope(
+      (scope) => new Uint8Array(inkOf(cv, scope, page).data)
+    );
+    const glyphs = (jogs: boolean) => {
+      const band = bandWithoutLines(
+        ink,
+        page.width,
+        page.height,
+        tab.group,
+        undefined,
+        jogs
+      );
+      const cols = tab.group.x1 - tab.group.x0 + 1;
+      return componentBoxes(cv, band.data, cols, band.rows).filter(
+        (box) => Math.abs(box.x + tab.group.x0 - x) < TAB
+      );
+    };
+    expect(glyphs(true)).toHaveLength(1);
+    expect(glyphs(false)).toHaveLength(2);
+  });
+});
+
+describe("notes whose fret was not read", () => {
+  const top = 400;
+  const line = (k: number) => top + k * TAB;
+  // A mark on the top line that reads as no fret, over a pen's stem down to a
+  // beam; a second beamed stem with nothing over it.
+  const drawn: readonly Drawn[] = [
+    { empty: true, kind: "tab", lines: 4, spacing: TAB, top },
+    {
+      kind: "strokes",
+      strokes: [
+        {
+          points: [
+            [592, line(0) - 7],
+            [608, line(0) - 7],
+            [608, line(0) + 7],
+            [592, line(0) + 7],
+            [592, line(0) - 7],
+          ],
+          thickness: 2,
+        },
+        {
+          points: [
+            [601, line(1) + 4],
+            [601, line(3) + 2 * TAB],
+          ],
+          thickness: 2,
+        },
+        {
+          points: [
+            [661, line(1) + 4],
+            [661, line(3) + 2 * TAB],
+          ],
+          thickness: 2,
+        },
+        {
+          points: [
+            [601, line(3) + 2 * TAB - 2],
+            [661, line(3) + 2 * TAB - 2],
+          ],
+          thickness: 4,
+        },
+      ],
+    },
+  ];
+
+  const readAs = async (text: string) => {
+    const cv = await testOpenCv();
+    const page = drawPage(cv, drawn);
+    const tabs = await detectTablature(cv, page, unreachable);
+    return readTablature(cv, page, tabs, answering(text).read);
+  };
+
+  it("reports a beamed stem under no fret, with the line and text of the mark over it", async () => {
+    const [reading] = await readAs("u");
+    expect(reading?.events).toEqual([]);
+    expect(
+      reading?.unreadFrets?.map((u) => ({
+        beams: u.stem.kind === "stem" ? u.stem.beams : undefined,
+        reason: u.reason,
+        string: u.string,
+        text: u.text,
+        x: Math.round(u.x * PAGE_WIDTH),
+      }))
+    ).toEqual([
+      { beams: 1, reason: "stem_without_fret", string: 1, text: "u", x: 601 },
+      {
+        beams: 1,
+        reason: "stem_without_fret",
+        string: undefined,
+        text: undefined,
+        x: 661,
+      },
+    ]);
+  });
+
+  it("takes a stem under a dead note's x for that note's, not an unread fret", async () => {
+    const [reading] = await readAs("x");
+    expect(
+      reading?.unreadFrets?.map((u) => Math.round(u.x * PAGE_WIDTH))
+    ).toEqual([661]);
   });
 });
 

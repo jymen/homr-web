@@ -570,6 +570,143 @@ both): a hand's circled zeros, 1.4 to 2.1 spacings, as on the owner's
 handwritten Sourwood Mountain. Such a tab is read at that size. Its debug
 dumps are gone; it changes nothing on the test pages above.
 
+## Weeping Willow: the endings line, pen stems and jogs (2026-11-01)
+
+Three more reader fixes for the owner's handwritten banjo page, each
+measured on Weeping Willow against the hand transcription (notes in order,
+longest common subsequence), on the 16 printed tab pages (2189 notes)
+against 0.5.3's own reading, and on the staff-only pages (Reel de Mattawa at
+200, 300 and 400 dpi, Marche des élèves: no tab, as before):
+
+| change | Weeping Willow | printed notes changed |
+|---|---|---|
+| 0.5.3 | 94/129 (23, 27, 30, 14, 0 of 27, 32, 32, 31, 7) | - |
+| 1. five-line groups drawn like the page's tabs | 101/129 (endings 7/7) | 0 |
+| 2. a pen's stem has no head | 109/129 (line 4 14 to 22) | 0 |
+| 3. a stroke turning along a line keeps it | 119/129 (26, 28, 30, 28, 7) | 4 (Killdare Fancy, below) |
+
+1. **The endings line.** It holds four printed-size marks, so it went to the
+   digit test with them, one zero read "日", failed, and never reached the
+   hand's second chance (which looks only at groups under four marks). Once
+   a page has two five-line tabs read as numbers, a five-line group the test
+   refused is taken too when its line spacing is within 10% of every one of
+   theirs and its marks, at a hand's size with the stems erased, stand on
+   its lines rather than in its spaces (at most a third as many in the
+   spaces, the hand test's own share): `alikeFiveLineTabs`. Measured first
+   on every score-and-tab page here, a program draws the staff smaller than
+   its tab (17.7 against 26.6 px on Moon over Shanghai, 18.75 against 28.1
+   on Amazing Grace, 21 to 22 against 32.9 on Old Joe Clark, 24 against 42
+   on the TablEdit pages, 27.1 against 40.7 on Blackberry Blossom), a third
+   smaller or more; Weeping Willow's tabs are 18.40 to 18.52 and its endings
+   line 18.71. A staff drawn at its tab's size would still have its
+   noteheads in its spaces, which the placement test refuses (a test page
+   draws one). A group taken this way and read to nothing is left to homr,
+   as any other (2026-10-31).
+2. **A stem drawn through the tab.** `hangsAStem` took two of line 4's pen
+   stems for frets hanging their stems: rows 4 to 7 px wide over the stem's
+   first spacing count as "not thin" against 0.2 spacings (3.7 px), so the
+   stem's top passed for a head. Two such components switch the system to
+   Peghead Nation's cutting between the lines, which cut every stem into
+   pieces, and the top pieces, a pen's width and a spacing tall, read as 1s
+   (5/1 seven times). A head is now at least twice as wide as the stem's
+   median row. The printed pages read as before, Peghead Nation's
+   stem-hanging frets included.
+3. **A 5 or a 2 written across a line.** The line erasure keeps a line pixel
+   only where ink touches the line from above or below in the same column.
+   A hand's 5 comes down to the line and starts its bowl four pixels to the
+   right, so the columns between were erased and the 5 fell in two, its top
+   a short mark and its bowl read as nothing; a 2 meets the line with its
+   diagonal the same way. Reading a system, the line is now kept between a
+   stroke leaving it upwards and one leaving it downwards when they are at
+   most two of the narrower stroke's widths apart and under 0.4 spacings
+   (`bridgeJogs`). Knocked-out systems are read as before, since a
+   knocked-out fret never runs along a line: on Cripple Creek the rule
+   joined a slide letter to the line's stub and lost a 2/0, and on Moon over
+   Shanghai it moved two frets. Deciding whether a group is a tab is
+   unchanged.
+
+   **Killdare Fancy changes.** Its digits are printed over the lines, as a
+   hand's are, and its slanting strokes cross them the same way. System 4
+   read `2/5 2/1 2/5 3/5 2/1 2/5 2/5 2/1 2/1` and now reads `2/5 2/5 3/5 2/5
+   2/5`: the four 2/1 were pieces of glyphs the line erasure had cut (a 4's
+   upright read alone as "1"; the foot of a 2 read "と"), and no fret read
+   before is lost. It is the only
+   printed change, and it breaks the bar set for this work (no printed note
+   changed), so it is the owner's to accept or not; passing `false` for
+   `jogs` in `placementByRecogniser` (src/tab/read.ts) undoes step 3 alone.
+
+Rechecked on the final tree: `npm test` (62 files, 1144 tests, the local
+suites included: 79 tab systems on the 21 pages of `tab-local.test.ts`, no
+tab on the staff pages, Cotton-Eyed Joe from the image and the text layer);
+`tools/tab-rhythm-accuracy.ts` 221/242 bars summing to the meter and
+715/724 durations agreeing, as before; the owner's handwritten Shortnin'
+Bread reads the same events (15, 17, 18, 19).
+
+What Weeping Willow still loses (10 notes): three 5s on the third string
+(lines 2 and 3), a 1 drawn as a tick on the second string (lines 1 and 4),
+two 2s on the first string (lines 2 and 4), a 3/2 on line 3, and two 4s on
+the third string read "11" and "1"; a stem crossing the bottom line still
+reads 5/1 once (line 2, inside a fret's column). Against 4/4, 4 of 18
+bars sum: seven are an eighth short or long, a fret not read or a beam
+missed (a quarter for an eighth), and seven hold notes with no stem read
+(the pickup and the endings among them).
+
+## Notes whose fret was not read, and a pen's stems and beams (2026-11-01)
+
+The owner chose, for a bar with a fret missing: report the note with its
+duration and let the app show "?" (option (a)). Evidence on the page only: a
+stem with its beam under the tab and no fret read above it.
+
+**The shape.** `TabReading.unreadFrets?: TabUnreadFret[]`, each `{ x, stem,
+reason: "stem_without_fret", string?, text? }`, apart from `events`:
+`TabPlacedEvent.notes` and `TabTuneEvent.notes` are non-empty tuples and the
+answers name events by index, so an event without a fret could not join them
+without breaking both. `string` and `text` come from a mark standing over the
+stem that read as no fret (an unread mark, a technique letter, a short mark):
+Weeping Willow's lost 1s carry "1" and "f", its 2 on the first string "Z", a
+5 "S". Bars count an unread fret's time (`TabBarCheck.unreadFrets`), and the
+tune holds it in `TabTuneBar.unread`, `{ before, duration, index, system,
+string?, text? }`, standing before the bar's `events[before]`. Everything is
+optional: a reading without unread frets resolves exactly as before.
+
+**Finding the stems** (`strayStems`, `ownerOf`). A thin stroke crossing the
+row one spacing under the bottom line that no fret column's stem took, at
+least 1.5 spacings long, starting between the top line and 0.75 spacing
+under the bottom one, with a beam or flag at its end. Next to one stemless
+fret column it is that column's stem (a pen hangs it from a wide zero's
+side, out of `stemReach`); next to a stemmed column, or to two columns, it is
+nobody's; near none, it is an unread fret, unless a dead note's `x` stands
+over it. Each condition was earned: without the length and start, the
+letters of "DADGAD" under Brian Boru's March's clef made seven notes; without
+the `x` rule, Moon over Shanghai's two dead notes; without the two-column
+rule, a stem went to the wrong voice of a Moon over Shanghai chord.
+
+**A pen's stems and beams.** A stem's path now skips one empty row (a pixel's
+break in the stroke), a beam may lie up to 0.4 spacing under the stem's end
+(Weeping Willow's stems stop up to six rows short of it), and a beam counts
+when `beamMinThickness` of its rows at the far column are ink (its end
+frays).
+
+| Weeping Willow, against 4/4 | bars that sum |
+|---|---|
+| after steps 1 to 3 | 4/18 |
+| unread frets reported | 11/18 |
+| a pen's stems and beams | 15/18 |
+
+The three bars left hold notes the page draws with no stem at all (the
+pickup's three, the last bar's first note, two notes of the first ending):
+nothing to read, so they stay to the musician. Notes read stay 119 of 129;
+the eight unread frets stand at eight of the ten notes lost, each with its
+duration.
+
+Printed pages: every fret and every stem as before on the 16 pages. One
+unread fret appears, on Moon over Shanghai's first system: a stem and double
+beam under no fret where Guitar Pro leaves out a tied note's fret, which
+makes that bar sum (`tools/tab-rhythm-accuracy.ts` 221 to 222 of 242 bars,
+715 of 724 durations as before). Staff pages: no tab, as before.
+`--layer` could not be rerun: its source PDFs are no longer where
+`tab-rhythm-truth.json` points (tab-import-samples/Angelina baker ...).
+
 ## What remains
 
 - Rests, tuplets, two voices in one tab, stems above the tab (all reported
@@ -582,10 +719,9 @@ dumps are gone; it changes nothing on the test pages above.
 - Scans and photos: unchanged from tab-2 and tab-3, but for a turned scan's
   lines, a hand's large digits and slanting stems, and a hand's digits read
   by the classifier (Weeping Willow, above).
-- Weeping Willow still loses 35 of 129 notes, for four reasons the
-  classifier cannot touch: the endings line is not found as a tab (4
-  printed-size marks, "日" for a zero: 7 notes); a 5 or 2 written across a
-  line is cut in two by the line erasure and read as neither; the top of a
-  stem drawn through the tab reads as a "1" on the line it starts at (line 4
-  reads 5/1 seven times); and a bar with a fret missing or extra needs the
-  bar fixer before its durations can be offered.
+- Weeping Willow still loses 10 of 129 notes, eight of them now reported as
+  unread frets with their time; 15 of its 18 bars sum to 4/4, the other
+  three holding notes drawn with no stem.
+- Dead notes ("x") are annotations, not events, so their time is not
+  counted; and a tied note's fret Guitar Pro leaves out comes back as an
+  unread fret, not as the fret its tie gives.

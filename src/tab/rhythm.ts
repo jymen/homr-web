@@ -36,6 +36,8 @@ const RHYTHM = {
   barInk: 0.92,
   /** A barline's ink carries on at most this far past the outer lines. */
   barOverhang: 0.35,
+  /** A beam may lie this far under the stem's end: a pen's stem stops a row or three short of its beam (Weeping Willow). */
+  beamGap: 0.4,
   /** A beam is at least this thick and runs at least this far from its stem. */
   beamMinThickness: 0.1,
   beamReach: 0.4,
@@ -71,6 +73,12 @@ const RHYTHM = {
   stemReach: 0.3,
   /** A stem starts at most this far below the bottom line, or below its lowest fret when that is lower. */
   stemStart: 1.5,
+  /** And is at least this long: the upright of a letter under the tab is shorter. */
+  strayLength: 1.5,
+  /** Stray stems are looked for across this row, this far under the bottom line: below a fret on it. */
+  strayRow: 1,
+  /** A stray stem starts no lower than this under the bottom line, where a fret on it ends: text under a tab starts lower. */
+  strayStart: 0.75,
   /** A barline at least this wide is thick. */
   thickBar: 0.25,
   timeMaxHeight: 2.8,
@@ -119,11 +127,24 @@ export interface ArcBetween {
   readonly to: number;
 }
 
+/**
+ * A beamed stem that hangs from no fret column: a note the page draws whose
+ * fret was not read. `x` is the stem's column at its top, where its fret
+ * stands, and `top` its first row, in page pixels.
+ */
+export interface StrayStem {
+  readonly stem: TabStem;
+  readonly top: number;
+  readonly x: number;
+}
+
 /** A system's rhythm geometry, in page pixels. */
 export interface SystemRhythmGeometry {
   readonly barlines: readonly (TabBarline & { readonly px: number })[];
   readonly slurs: readonly ArcBetween[];
   readonly stems: readonly TabStem[];
+  /** Beamed stems under no fret column, left to right. */
+  readonly strays: readonly StrayStem[];
   /** Candidates for the time signature's two digits, top first, the likeliest first. */
   readonly timeDigits: readonly (readonly [Box, Box])[];
 }
@@ -253,25 +274,40 @@ interface Stem {
  * The ink run down from (x, y), stepping a column aside where the ink does,
  * as long as it leans at most `stemLean`: a pen's stem slants, so a run down
  * one column ends partway (Weeping Willow's stems leave their column after
- * two or three line spacings, above their beams). The column at each row.
+ * two or three line spacings, above their beams), and skipping a row where
+ * the pen's stroke breaks for a pixel (`STEM_GAP`). The column at each row.
  */
 function stemPath(w: Window, x: number, y: number): number[] {
   const path: number[] = [];
   let at = x;
-  for (let row = y; inkAt(w, at, row); row += 1) {
+  let row = y;
+  while (inkAt(w, at, row)) {
     path.push(at);
-    const next = [at, at - 1, at + 1].find(
-      (c) =>
-        inkAt(w, c, row + 1) &&
-        Math.abs(c - x) <= Math.max(1, RHYTHM.stemLean * (path.length + 1))
-    );
+    let next: number | undefined;
+    let step = 1;
+    for (; step <= 1 + STEM_GAP && next === undefined; step += 1) {
+      const below = row + step;
+      next = [at, at - 1, at + 1].find(
+        (c) =>
+          inkAt(w, c, below) &&
+          Math.abs(c - x) <= Math.max(1, RHYTHM.stemLean * (path.length + step))
+      );
+    }
     if (next === undefined) {
       break;
     }
+    // A row the pen skipped counts in the stem, at the column above it.
+    for (let gap = 2; gap < step; gap += 1) {
+      path.push(at);
+    }
     at = next;
+    row += step - 1;
   }
   return path;
 }
+
+/** Empty rows a pen's stem may skip, a pixel's break in its stroke (Weeping Willow). */
+const STEM_GAP = 1;
 
 /**
  * The longest thin run down under a fret column, leaning at most
@@ -328,7 +364,9 @@ function widthAt(w: Window, x: number, y: number): number {
 /**
  * Beams or flags across a stem's lower end, counted on the side with more.
  * A beam is a horizontal run crossing two columns beside the stem, `near`
- * and `beamReach` away, on the same rows, at least `beamMinThickness` thick.
+ * and `beamReach` away, at least `beamMinThickness` thick, ending at most
+ * `beamGap` under the stem's end; a pen's beam frays, so `beamMinThickness`
+ * of its rows at the far column is enough.
  * A flag (a lone eighth's, TablEdit's) leaves the stem's end rising to the
  * right: a run crossing the near column with ink `flagReach` from the stem
  * within `flagRise` above it.
@@ -341,11 +379,12 @@ function beamsOn(w: Window, stem: Stem, s: number): number {
     stem.top + Math.round(0.3 * s),
     stem.bottom - Math.round(RHYTHM.beamWindow * s)
   );
+  const end = stem.bottom + Math.max(2, Math.round(RHYTHM.beamGap * s));
   const runsAt = (x: number, crossing: (y0: number, y1: number) => boolean) => {
     let runs = 0;
     let start = -1;
-    for (let y = top; y <= stem.bottom + 3; y += 1) {
-      if (inkAt(w, x, y) && y <= stem.bottom + 2) {
+    for (let y = top; y <= end + 1; y += 1) {
+      if (inkAt(w, x, y) && y <= end) {
         start = start < 0 ? y : start;
         continue;
       }
@@ -356,14 +395,15 @@ function beamsOn(w: Window, stem: Stem, s: number): number {
     }
     return runs;
   };
+  // A pen's beam thins and frays near its end: `thick` of its rows at the far
+  // column is enough.
   const beams = (side: 1 | -1) =>
     runsAt(stem.x + side * near, (y0, y1) => {
+      let inked = 0;
       for (let y = y0; y <= y1; y += 1) {
-        if (!inkAt(w, stem.x + side * far, y)) {
-          return false;
-        }
+        inked += inkAt(w, stem.x + side * far, y) ? 1 : 0;
       }
-      return true;
+      return inked >= Math.min(thick, y1 - y0 + 1);
     });
   const rise = Math.round(RHYTHM.flagRise * s);
   const tip = Math.round(RHYTHM.flagReach * s);
@@ -376,6 +416,109 @@ function beamsOn(w: Window, stem: Stem, s: number): number {
     return false;
   });
   return Math.max(beams(-1), beams(1), flags);
+}
+
+/** The top of the stroke through (x, y), followed up a column aside where the ink does, leaning at most `stemLean`. */
+function strokeTop(w: Window, x: number, y: number): { x: number; y: number } {
+  let at = x;
+  let row = y;
+  while (row > 0) {
+    const climbed = y - row + 1;
+    const next = [at, at - 1, at + 1].find(
+      (c) =>
+        inkAt(w, c, row - 1) &&
+        Math.abs(c - x) <= Math.max(1, RHYTHM.stemLean * climbed)
+    );
+    if (next === undefined) {
+      break;
+    }
+    at = next;
+    row -= 1;
+  }
+  return { x: at, y: row };
+}
+
+/**
+ * Stems crossing the row `strayRow` under the bottom line that no fret
+ * column's stem took, at least `strayLength` long, starting no higher than
+ * the top line and no lower than `strayStart` under the bottom one, no wider
+ * than a stem, and carrying a beam or a flag at their lower end: the ink of a
+ * note whose fret was not read. A stroke with no beam is not taken (a
+ * letter, a lyric, a stem of a quarter whose fret is missing alike).
+ */
+function strayStems(
+  w: Window,
+  group: LineGroup,
+  taken: readonly (Stem | undefined)[]
+): { readonly stem: Stem; readonly topX: number }[] {
+  const s = group.spacing;
+  const row = bottomOf(group) - w.top + Math.round(RHYTHM.strayRow * s);
+  const highest = topOf(group) - w.top;
+  const lowest = bottomOf(group) - w.top + RHYTHM.strayStart * s;
+  const reach = Math.max(3, RHYTHM.stemReach * s);
+  const strays: { readonly stem: Stem; readonly topX: number }[] = [];
+  let x = 0;
+  while (x < w.cols) {
+    if (!inkAt(w, x, row)) {
+      x += 1;
+      continue;
+    }
+    const start = x;
+    while (inkAt(w, x, row)) {
+      x += 1;
+    }
+    const top = strokeTop(w, Math.floor((start + x - 1) / 2), row);
+    const path = stemPath(w, top.x, top.y);
+    const middle = Math.floor(path.length / 2);
+    const stem: Stem = {
+      bottom: top.y + path.length - 1,
+      top: top.y,
+      x: path.at(-1) ?? top.x,
+    };
+    if (
+      x - start <= RHYTHM.stemMaxWidth * s * 2 &&
+      top.y >= highest &&
+      top.y <= lowest &&
+      path.length >= RHYTHM.strayLength * s &&
+      widthAt(w, path[middle] ?? top.x, top.y + middle) <=
+        RHYTHM.stemMaxWidth * s &&
+      !taken.some((t) => t !== undefined && Math.abs(t.x - stem.x) <= reach) &&
+      !strays.some((t) => Math.abs(t.stem.x - stem.x) <= reach) &&
+      beamsOn(w, stem, s) > 0
+    ) {
+      strays.push({ stem, topX: top.x });
+    }
+  }
+  return strays;
+}
+
+/**
+ * The stemless fret column a stray stem hangs from: the one whose marks'
+ * extent, widened by `stemReach`, holds the stem's top column. A pen hangs a
+ * stem from a wide zero's side, further from its centre than `stemReach`
+ * (Weeping Willow). `taken` when that column has a stem already, or when two
+ * columns are that near (two voices a few pixels apart on Moon over
+ * Shanghai: whose stem it is cannot be told), `none` when no column is near:
+ * a note whose fret was not read.
+ */
+function ownerOf(
+  columns: readonly FretColumn[],
+  stems: readonly (Stem | undefined)[],
+  x: number,
+  s: number
+): number | "none" | "taken" {
+  const reach = RHYTHM.stemReach * s;
+  const near = [...columns.entries()].filter(([, column]) => {
+    const left = Math.min(...column.notes.map((n) => n.box.x)) - reach;
+    const right =
+      Math.max(...column.notes.map((n) => n.box.x + n.box.w)) + reach;
+    return x >= left && x <= right;
+  });
+  const [only, ...others] = near;
+  if (only === undefined) {
+    return "none";
+  }
+  return others.length > 0 || stems[only[0]] !== undefined ? "taken" : only[0];
 }
 
 /** Small round marks just right of a stem's end, clear of its beams. */
@@ -659,6 +802,16 @@ export function rhythmGeometry(
   const s = group.spacing;
   const boxes = componentBoxes(cv, w.data, w.cols, w.rows);
   const stems = columns.map((column) => stemUnder(w, column, group));
+  const strays = strayStems(w, group, stems).filter(({ stem, topX }) => {
+    const owner = ownerOf(columns, stems, w.left + topX, group.spacing);
+    if (owner === "none") {
+      return true;
+    }
+    if (owner !== "taken") {
+      stems[owner] = stem;
+    }
+    return false;
+  });
   const timeDigits = timeDigitsOf(boxes, w, group, columns);
   const slurs = slursOf(arcsOf(boxes, w, group), columns, group).map(
     (slur): ArcBetween => {
@@ -689,6 +842,15 @@ export function rhythmGeometry(
               kind: "stem",
             }
     ),
+    strays: strays.map(({ stem, topX }) => ({
+      stem: {
+        beams: beamsOn(w, stem, s),
+        dots: dotsBy(cv, w, stem, s),
+        kind: "stem",
+      },
+      top: stem.top + w.top,
+      x: w.left + topX,
+    })),
     timeDigits,
   };
 }

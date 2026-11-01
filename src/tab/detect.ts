@@ -57,6 +57,8 @@ export interface DetectedTab {
   readonly group: LineGroup;
   /** Found by the hand-written second chance (handWrittenMarks): read at HAND_MARK, stems erased. */
   readonly hand?: boolean;
+  /** Its frets are knocked out of its lines (knockedOutShare), as tab software prints them: no stroke of a fret ever runs along a line. */
+  readonly knocksOut?: boolean;
   readonly system: TabSystem;
 }
 
@@ -103,6 +105,8 @@ interface Candidate {
 export type ReadCrops = (crops: readonly ColorImage[]) => Promise<string[]>;
 
 const TAB = {
+  /** A refused five-line group is drawn like the page's five-line tabs within this share of each one's line spacing (alikeFiveLineTabs). */
+  alikeSpacing: 0.1,
   /** Rows of a line touched by a beam: those covered at least this share of the most covered row, the others at most `besideLineShare`. */
   besideLineShare: 0.25,
   /** Crop padding, in line spacings. */
@@ -129,10 +133,14 @@ const TAB = {
   /** The stem hangs within this share of the head's width from its middle. */
   hangingCentred: 0.2,
   hangingHead: 0.5,
+  /** The head's widest row at least this many times the stem's median width. */
+  hangingHeadWidth: 2,
   hangingHeight: 1.5,
   /** The head is looked for in this many spacings from the top. */
   hangingReach: 1.3,
   hangingThinShare: 0.8,
+  /** A stroke's jog along a line spans at most this many of its widths (bridgeJogs). */
+  jogWidths: 2,
   /**
    * A mark is knocked out when its line is blank within this many line
    * spacings on both sides of it ("—10—"), as tab software prints a fret.
@@ -165,6 +173,8 @@ const TAB = {
   /** Two marks on one line merge into one number ("10") across a gap below this. */
   mergeGap: 0.18,
   mergeWidth: 1.2,
+  /** Five-line tabs read as numbers on a page before a refused group drawn like them is taken too. */
+  minAlikeTabs: 2,
   minDigitShare: 0.5,
   /** A five-line group is a tab with this many numbers, making at least this share of the marks read. */
   minDigits: 4,
@@ -890,7 +900,9 @@ function eraseStubs(
  * keeps its middle, and when it belongs to the line itself: a horizontal run
  * at least a line spacing long, or a shorter one with a free end (a stub of
  * line left beside a knock-out). The bar of an H standing on the line inside
- * a knock-out is short and held by a stem at both ends, so it stays.
+ * a knock-out is short and held by a stem at both ends, so it stays. With
+ * `jogs`, a stroke turning along the line keeps the line under its turn
+ * (bridgeJogs): reading a system whose frets stand over its lines.
  */
 export function bandWithoutLines(
   ink: Uint8Array,
@@ -900,7 +912,8 @@ export function bandWithoutLines(
   reach: { readonly above: number; readonly below: number } = {
     above: TAB.markBand,
     below: TAB.markBand,
-  }
+  },
+  jogs = false
 ): Band {
   const { bottom, top } = bandOf(group, height, reach.above, reach.below);
   const cols = group.x1 - group.x0 + 1;
@@ -913,12 +926,14 @@ export function bandWithoutLines(
   for (const line of group.lines) {
     const a = line.y0 - 1 - top;
     const b = line.y1 + 1 - top;
-    const free = new Uint8Array(cols);
-    for (let x = 0; x < cols; x += 1) {
-      const above = a - 1 >= 0 && data[(a - 1) * cols + x] === 1;
-      const below = b + 1 < rows && data[(b + 1) * cols + x] === 1;
-      free[x] = above || below ? 0 : 1;
-    }
+    const free = freeColumns(
+      data,
+      cols,
+      rows,
+      a,
+      b,
+      jogs ? TAB.strokeWidth * group.spacing : undefined
+    );
     const ruled = ruledColumns(data, cols, line.y0 - top, line.y1 - top, {
       free,
       minRun: group.spacing,
@@ -932,6 +947,95 @@ export function bandWithoutLines(
     }
   }
   return { data, rows, top };
+}
+
+/**
+ * 1 for the columns where nothing touches the line from the row above `a`
+ * or below `b`, but for a stroke's jog along the line shorter than `jogGap`
+ * when one is given (bridgeJogs).
+ */
+function freeColumns(
+  data: Uint8Array,
+  cols: number,
+  rows: number,
+  a: number,
+  b: number,
+  jogGap: number | undefined
+): Uint8Array {
+  const free = new Uint8Array(cols);
+  const above = new Uint8Array(cols);
+  const below = new Uint8Array(cols);
+  for (let x = 0; x < cols; x += 1) {
+    above[x] = a - 1 >= 0 && data[(a - 1) * cols + x] === 1 ? 1 : 0;
+    below[x] = b + 1 < rows && data[(b + 1) * cols + x] === 1 ? 1 : 0;
+    free[x] = above[x] === 1 || below[x] === 1 ? 0 : 1;
+  }
+  if (jogGap !== undefined) {
+    bridgeJogs(free, above, below, jogGap);
+  }
+  return free;
+}
+
+/**
+ * Holds, in place, the free columns of a line between a stroke leaving it
+ * upwards and one leaving it downwards, when they are less than `maxGap`
+ * apart and at most `jogWidths` times the narrower stroke's width: one
+ * stroke of a glyph turning along the line for a pen's width or two. A
+ * hand's 5 comes down to the line and starts its bowl four pixels to the
+ * right (strokes four wide); erasing the line there cut it in two (Weeping
+ * Willow), the top read as a short mark and the bottom as nothing. Strokes
+ * touching from one side only (two frets sitting on the line), a stem
+ * crossing it, and strokes further apart than a turn (a printed letter and
+ * a digit on a line, 9 to 16 px apart for strokes 2 to 3 wide on Cripple
+ * Creek) join nothing.
+ */
+function bridgeJogs(
+  free: Uint8Array,
+  above: Uint8Array,
+  below: Uint8Array,
+  maxGap: number
+): void {
+  const side = (at: number) => {
+    if (above[at] === 1 && below[at] !== 1) {
+      return above;
+    }
+    return below[at] === 1 && above[at] !== 1 ? below : undefined;
+  };
+  const widthFrom = (row: Uint8Array, at: number, step: 1 | -1) => {
+    let k = at;
+    while (k >= 0 && k < row.length && row[k] === 1) {
+      k += step;
+    }
+    return Math.abs(k - at);
+  };
+  let x = 0;
+  while (x < free.length) {
+    if (free[x] !== 1) {
+      x += 1;
+      continue;
+    }
+    const start = x;
+    while (x < free.length && free[x] === 1) {
+      x += 1;
+    }
+    const left = side(start - 1);
+    const right = side(x);
+    if (
+      left === undefined ||
+      right === undefined ||
+      left === right ||
+      x - start >= maxGap
+    ) {
+      continue;
+    }
+    const narrower = Math.min(
+      widthFrom(left, start - 1, -1),
+      widthFrom(right, x, 1)
+    );
+    if (x - start <= TAB.jogWidths * narrower) {
+      free.fill(0, start, x);
+    }
+  }
 }
 
 /** 1 for the columns of the line's rows that lie in a run belonging to the line (see bandWithoutLines). */
@@ -1095,20 +1199,25 @@ function grownOverCuts(box: Box, cut: Uint8Array): Box {
  * (Peghead Nation): at least 1.5 spacings tall and no wider than a fret,
  * with a head of a fret's height (0.5 to 1.15 spacings) above rows that are
  * a stem's width all the way down (80% of them), hung from the head's
- * middle. A staff's note hangs its stem from the head's left edge; a "T" of
- * a TAB clef has a head as thin as its bar.
+ * middle, the head at least `hangingHeadWidth` times as wide as the stem. A
+ * staff's note hangs its stem from the head's left edge; a "T" of a TAB clef
+ * has a head as thin as its bar; and a pen's stem, a little wider than a
+ * printed one, has no head at all: on Weeping Willow two of them passed for
+ * frets hanging their stems (rows 4 to 7 px wide over 0.2 spacings, 3.7 px),
+ * which cut the hand's stems between the lines into pieces read as 1s.
  */
 function hangsAStem(band: Band, cols: number, box: Box, s: number): boolean {
   if (box.h < TAB.hangingHeight * s || box.w > TAB.maxMarkWidth * s) {
     return false;
   }
-  const thin = (y: number) => {
+  const inkedOn = (y: number) => {
     let inked = 0;
     for (let c = 0; c < box.w; c += 1) {
       inked += band.data[y * cols + box.x + c] ?? 0;
     }
-    return inked <= TAB.cutPieceWidth * s;
+    return inked;
   };
+  const thin = (y: number) => inkedOn(y) <= TAB.cutPieceWidth * s;
   let head = 0;
   for (let y = 0; y < Math.min(box.h, TAB.hangingReach * s); y += 1) {
     head = thin(box.y + y) ? head : y + 1;
@@ -1119,8 +1228,10 @@ function hangsAStem(band: Band, cols: number, box: Box, s: number): boolean {
   let stem = 0;
   let sumX = 0;
   let inked = 0;
+  const stemWidths: number[] = [];
   for (let y = box.y + head; y < box.y + box.h; y += 1) {
     stem += thin(y) ? 1 : 0;
+    stemWidths.push(inkedOn(y));
     for (let c = 0; c < box.w; c += 1) {
       if (band.data[y * cols + box.x + c] === 1) {
         sumX += c;
@@ -1128,8 +1239,13 @@ function hangsAStem(band: Band, cols: number, box: Box, s: number): boolean {
       }
     }
   }
+  const headWidth = Math.max(
+    ...Array.from({ length: head }, (_, y) => inkedOn(box.y + y))
+  );
   return (
     stem >= TAB.hangingThinShare * (box.h - head) &&
+    headWidth >=
+      TAB.hangingHeadWidth * (medianOf(stemWidths.filter((w) => w > 0)) ?? 0) &&
     Math.abs(sumX / Math.max(1, inked) - box.w / 2) <=
       TAB.hangingCentred * box.w
   );
@@ -1255,10 +1371,11 @@ export function marksOf(
   width: number,
   height: number,
   group: LineGroup,
-  size: MarkSize = PRINTED_MARK
+  size: MarkSize = PRINTED_MARK,
+  jogs = false
 ): { readonly marks: Mark[]; readonly short: Mark[] } {
   const s = group.spacing;
-  const band = bandWithoutLines(ink, width, height, group);
+  const band = bandWithoutLines(ink, width, height, group, undefined, jogs);
   const cols = group.x1 - group.x0 + 1;
   if (size === HAND_MARK) {
     eraseStems(band, cols, s);
@@ -1312,19 +1429,17 @@ export function marksOf(
 }
 
 /**
- * A five-line group's marks at a hand's size (HAND_MARK), when they sit on its
- * lines as a tab's frets do: at least minDigits on lines, and in its spaces at
- * most handInSpaceShare of that, which a staff's noteheads never manage.
- * Undefined otherwise. Sourwood Mountain's zeros are circles 1.4 spacings
- * wide, over a printed fret's size.
+ * Where a five-line group's marks sit at a hand's size (HAND_MARK), its stems
+ * erased first: on its lines, as a tab's frets do, or in its spaces, where a
+ * staff's noteheads sit as often as on its lines.
  */
-function handWrittenMarks(
+function handPlacement(
   cv: OpenCv,
   ink: Uint8Array,
   width: number,
   height: number,
   group: LineGroup
-): Mark[] | undefined {
+): { readonly inSpaces: number; readonly onLines: number } {
   const s = group.spacing;
   const band = bandWithoutLines(ink, width, height, group);
   const cols = group.x1 - group.x0 + 1;
@@ -1344,7 +1459,32 @@ function handWrittenMarks(
       inSpaces += 1;
     }
   }
-  if (onLines < TAB.minDigits || inSpaces > TAB.handInSpaceShare * onLines) {
+  return { inSpaces, onLines };
+}
+
+/** At most handInSpaceShare of the marks on the lines stand in the spaces: no staff's noteheads. */
+const sitsOnLines = ({
+  inSpaces,
+  onLines,
+}: ReturnType<typeof handPlacement>): boolean =>
+  inSpaces <= TAB.handInSpaceShare * onLines;
+
+/**
+ * A five-line group's marks at a hand's size (HAND_MARK), when they sit on its
+ * lines as a tab's frets do: at least minDigits on lines, and in its spaces at
+ * most handInSpaceShare of that, which a staff's noteheads never manage.
+ * Undefined otherwise. Sourwood Mountain's zeros are circles 1.4 spacings
+ * wide, over a printed fret's size.
+ */
+function handWrittenMarks(
+  cv: OpenCv,
+  ink: Uint8Array,
+  width: number,
+  height: number,
+  group: LineGroup
+): Mark[] | undefined {
+  const placement = handPlacement(cv, ink, width, height, group);
+  if (placement.onLines < TAB.minDigits || !sitsOnLines(placement)) {
     return;
   }
   return marksOf(cv, ink, width, height, group, HAND_MARK).marks;
@@ -1359,9 +1499,10 @@ export function inkWithoutLines(
   ink: Uint8Array,
   width: number,
   height: number,
-  group: LineGroup
+  group: LineGroup,
+  jogs = false
 ): Uint8Array {
-  const band = bandWithoutLines(ink, width, height, group);
+  const band = bandWithoutLines(ink, width, height, group, undefined, jogs);
   const cols = group.x1 - group.x0 + 1;
   const out = ink.slice();
   for (let y = 0; y < band.rows; y += 1) {
@@ -1501,6 +1642,36 @@ function keepPrintedAlike(tabs: readonly Candidate[]): Candidate[] {
   );
 }
 
+/**
+ * The five-line groups the digit test refused that are drawn like the page's
+ * five-line tabs, once it has `minAlikeTabs` of them: a line spacing within
+ * `alikeSpacing` of theirs, and marks standing on the lines rather than in the
+ * spaces (`onLines`), as no staff's noteheads do. A hand writes some lines
+ * with too few printed-size digits to pass: Weeping Willow's endings line holds
+ * four, one a zero read "日". A program draws a staff over its tab smaller
+ * than the tab (17.7 against 26.6 px to 27 against 41 on the local
+ * score-and-tab pages), and a staff at the tab's size still has noteheads in
+ * its spaces.
+ */
+function alikeFiveLineTabs(
+  tabs: readonly Candidate[],
+  refused: readonly Candidate[],
+  onLines: (group: LineGroup) => boolean
+): Candidate[] {
+  const spacings = tabs
+    .filter((c) => c.group.lines.length === 5 && c.evidence !== "tab")
+    .map((c) => c.group.spacing);
+  if (spacings.length < TAB.minAlikeTabs) {
+    return [];
+  }
+  const alike = (spacing: number) =>
+    spacings.every((s) => Math.abs(spacing - s) <= TAB.alikeSpacing * s);
+  return refused.filter(
+    (c) =>
+      c.group.lines.length === 5 && alike(c.group.spacing) && onLines(c.group)
+  );
+}
+
 const toSystem = (
   group: LineGroup,
   index: number,
@@ -1529,8 +1700,10 @@ export async function detectTablature(
   page: ColorImage,
   read: ReadCrops
 ): Promise<DetectedTab[]> {
+  const ink = withMatScope(
+    (scope) => new Uint8Array(inkOf(cv, scope, page).data)
+  );
   const groups = withMatScope((scope) => {
-    const ink = new Uint8Array(inkOf(cv, scope, page).data);
     const faint = faintInkOf(cv, scope, page);
     return groupLines(findLines(ink, page.width, page.height), page.height).map(
       (found): Candidate => {
@@ -1582,6 +1755,7 @@ export async function detectTablature(
     );
   });
   const candidates: Candidate[] = [];
+  const unread: Candidate[] = [];
   for (const candidate of groups) {
     const { evidence } = candidate;
     const isTab =
@@ -1590,11 +1764,24 @@ export async function detectTablature(
       (evidence !== "staff" && (await marksAreNumbers(evidence, read)));
     if (isTab) {
       candidates.push(candidate);
+    } else {
+      unread.push(candidate);
     }
   }
-  return keepPrintedAlike(candidates).map(({ group, hand }, index) => ({
+  const alike = alikeFiveLineTabs(candidates, unread, (group) =>
+    sitsOnLines(handPlacement(cv, ink, page.width, page.height, group))
+  );
+  return keepPrintedAlike(
+    [...candidates, ...alike].sort(
+      (a, b) =>
+        (a.group.lines[0] as PageLine).y - (b.group.lines[0] as PageLine).y
+    )
+  ).map(({ group, hand, knockedOut }, index) => ({
     group,
     ...(hand === true ? { hand } : {}),
+    ...(knockedOut !== undefined && knockedOut >= TAB.minKnockOutShare
+      ? { knocksOut: true }
+      : {}),
     system: toSystem(group, index, page.width, page.height),
   }));
 }

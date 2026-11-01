@@ -19,6 +19,7 @@ export type {
   TabSlurKind,
   TabTechnique,
   TabTimeSignature,
+  TabUnreadFret,
 } from "./tab/read.js";
 export type { TabBarline, TabStem } from "./tab/rhythm.js";
 export type {

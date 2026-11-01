@@ -145,6 +145,8 @@ export interface TabBarCheck {
   readonly pickup: boolean;
   readonly read: number;
   readonly system: number;
+  /** Notes in the bar whose fret was not read (`TabReading.unreadFrets`), counted in `read`; absent when none. */
+  readonly unreadFrets?: number;
 }
 
 /** An event's time: a written duration, or `grace`, a grace note taking no time before the next event. */
@@ -223,6 +225,22 @@ export interface TabTuneEvent {
   readonly system: number;
 }
 
+/**
+ * A note of the tune whose fret was not read (`TabReading.unreadFrets`): it
+ * keeps its time in the bar, for the app to show as "?" until the musician
+ * gives the fret.
+ */
+export interface TabTuneUnread {
+  /** It stands before the bar's `events[before]`; `events.length` at the bar's end. */
+  readonly before: number;
+  readonly duration: Duration;
+  /** Index into the system's `unreadFrets`. */
+  readonly index: number;
+  readonly string?: number;
+  readonly system: number;
+  readonly text?: string;
+}
+
 export interface TabTuneBar {
   readonly events: readonly TabTuneEvent[];
   readonly pickup: boolean;
@@ -230,6 +248,8 @@ export interface TabTuneBar {
   readonly repeatStart: boolean;
   /** The bar opens a new line of the page. */
   readonly systemBreakBefore: boolean;
+  /** Notes whose fret was not read, in their place among `events`; absent when none. */
+  readonly unread?: readonly TabTuneUnread[];
 }
 
 /** A playable tune: every prerequisite settled, every bar the meter's length, but an upbeat of at most half a bar opening the tune or a repeated part, and the bar closing that part completing it. */
@@ -322,11 +342,14 @@ interface RawBar {
   readonly repeatStart: boolean;
   readonly system: number;
   readonly systemBreakBefore: boolean;
+  /** Indices into the system's `unreadFrets`, and the time they take. */
+  readonly unread: readonly number[];
+  readonly unreadTicks: number;
 }
 
-/** The events of each system cut at its barlines; bars holding no event are dropped. */
+/** The events and unread frets of each system cut at its barlines; bars holding neither are dropped. */
 export function barsOf(
-  systems: readonly Pick<TabReading, "barlines" | "events">[]
+  systems: readonly Pick<TabReading, "barlines" | "events" | "unreadFrets">[]
 ): RawBar[] {
   const bars: RawBar[] = [];
   for (const [system, reading] of systems.entries()) {
@@ -336,13 +359,17 @@ export function barsOf(
     for (let k = 0; k + 1 < edges.length; k += 1) {
       const left = edges[k];
       const right = edges[k + 1];
+      const within = (x: number) =>
+        (left === undefined || x > left.x) &&
+        (right === undefined || x < right.x);
       const events = reading.events.flatMap((event, index) =>
-        (left === undefined || event.x > left.x) &&
-        (right === undefined || event.x < right.x)
-          ? [index]
-          : []
+        within(event.x) ? [index] : []
       );
-      if (events.length === 0) {
+      const unreadFrets = reading.unreadFrets ?? [];
+      const unread = unreadFrets.flatMap((fret, index) =>
+        within(fret.x) ? [index] : []
+      );
+      if (events.length + unread.length === 0) {
         continue;
       }
       bars.push({
@@ -351,6 +378,12 @@ export function barsOf(
         repeatStart: left?.repeatStart ?? false,
         system,
         systemBreakBefore: first && system > 0,
+        unread,
+        unreadTicks: unread.reduce((sum, at) => {
+          const held = unreadFrets[at]?.stem;
+          const value = held === undefined ? undefined : durationOfStem(held);
+          return sum + (value === undefined ? 0 : ticksOf(value));
+        }, 0),
       });
       first = false;
     }
@@ -384,7 +417,7 @@ function fitBars(
     bar.events.reduce((sum, e) => {
       const d = read[bar.system]?.[e];
       return sum + (d === undefined ? Number.NaN : lengthOf(d));
-    }, 0);
+    }, bar.unreadTicks);
   const upbeatOf = (bar: RawBar, count: number) => {
     const length = lengthOfBar(bar);
     return count > 1 && length > 0 && length <= full / 2 ? length : undefined;
@@ -392,7 +425,10 @@ function fitBars(
   let upbeat: number | undefined;
   const checks = bars.map((bar, index): TabBarCheck => {
     const values = bar.events.map((e) => read[bar.system]?.[e]);
-    const known = values.reduce((sum, d) => sum + (d ? lengthOf(d) : 0), 0);
+    const known = values.reduce(
+      (sum, d) => sum + (d ? lengthOf(d) : 0),
+      bar.unreadTicks
+    );
     const open = values.filter((d) => d === undefined).length;
     const long = open === 0 ? undefined : longOf((full - known) / open);
     for (const [k, e] of bar.events.entries()) {
@@ -416,6 +452,7 @@ function fitBars(
       pickup,
       read: quarters(known + (long === undefined ? 0 : open * ticksOf(long))),
       system: bar.system,
+      ...(bar.unread.length === 0 ? {} : { unreadFrets: bar.unread.length }),
     };
   });
   return { checks, durations };
@@ -892,12 +929,33 @@ function tuneOf(systems: readonly TabReading[], known: Settled): TabTune {
       });
       graces = [];
     }
+    const reading = systems[bar.system] as TabReading;
+    const xOf = (event: TabTuneEvent) => reading.events[event.event]?.x ?? 0;
+    const unread = bar.unread.flatMap((k): TabTuneUnread[] => {
+      const fret = reading.unreadFrets?.[k];
+      const duration =
+        fret === undefined ? undefined : durationOfStem(fret.stem);
+      if (fret === undefined || duration === undefined) {
+        return [];
+      }
+      return [
+        {
+          before: events.filter((e) => xOf(e) < fret.x).length,
+          duration,
+          index: k,
+          ...(fret.string === undefined ? {} : { string: fret.string }),
+          system: bar.system,
+          ...(fret.text === undefined ? {} : { text: fret.text }),
+        },
+      ];
+    });
     return {
       events,
       pickup: checks[index]?.pickup ?? false,
       repeatEnd: bar.repeatEnd,
       repeatStart: bar.repeatStart,
       systemBreakBefore: bar.systemBreakBefore,
+      ...(unread.length === 0 ? {} : { unread }),
     };
   });
   return {

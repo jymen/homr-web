@@ -146,6 +146,55 @@ describe("rhythmGeometry", () => {
     ]);
   });
 
+  it("hangs a stem on the wide fret beside it, and reports beamed stems under no fret as strays", async () => {
+    const cv = await testOpenCv();
+    const { fill, ink } = page();
+    for (const y of LINE_Y) {
+      fill(50, 1150, y, y + 1);
+    }
+    const columns = [column(850, 1)];
+    for (const { notes } of columns) {
+      for (const { box } of notes) {
+        fill(box.x, box.x + box.w - 1, box.y, box.y + box.h - 1);
+      }
+    }
+    // A pen's stem 10 px right of its fret's centre, out of stemReach.
+    fill(860, 861, 110, 215);
+    // A stem from the second line with no fret over it, on the same beam.
+    fill(950, 951, 125, 215);
+    fill(860, 952, 210, 215);
+    // A stem broken for a row that stops three rows short of its beam, and
+    // the stem at the beam's other end.
+    fill(1050, 1051, 125, 169);
+    fill(1050, 1051, 171, 204);
+    fill(1100, 1101, 125, 212);
+    fill(1050, 1101, 208, 212);
+    // An upright of a letter under the tab: not a stem.
+    fill(1000, 1001, 197, 228);
+    fill(1000, 1012, 225, 228);
+    const { stems, strays } = rhythmGeometry(
+      cv,
+      ink,
+      WIDTH,
+      HEIGHT,
+      group,
+      columns
+    );
+    expect(stems.map((st) => (st.kind === "none" ? "none" : st.beams))).toEqual(
+      [1]
+    );
+    expect(
+      strays.map((st) => [
+        Math.round(st.x / 10) * 10,
+        st.stem.kind === "none" ? "none" : st.stem.beams,
+      ])
+    ).toEqual([
+      [950, 1],
+      [1050, 1],
+      [1100, 1],
+    ]);
+  });
+
   it("ties an arc to the two frets on the string under it, with the letter by the first", async () => {
     const cv = await testOpenCv();
     const { columns, ink } = drawn();
