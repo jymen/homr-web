@@ -35,7 +35,7 @@ export interface TabSystem {
 }
 
 /** One horizontal line, in page pixels: `y` is its ink-weighted centre, `y0..y1` its rows, `breakLength` its longest break. */
-interface PageLine {
+export interface PageLine {
   readonly breakLength: number;
   readonly x0: number;
   readonly x1: number;
@@ -1374,12 +1374,27 @@ export function marksOf(
   size: MarkSize = PRINTED_MARK,
   jogs = false
 ): { readonly marks: Mark[]; readonly short: Mark[] } {
-  const s = group.spacing;
   const band = bandWithoutLines(ink, width, height, group, undefined, jogs);
-  const cols = group.x1 - group.x0 + 1;
   if (size === HAND_MARK) {
-    eraseStems(band, cols, s);
+    eraseStems(band, group.x1 - group.x0 + 1, group.spacing);
   }
+  return marksInBand(cv, band, group, size);
+}
+
+/**
+ * marksOf's marks in a band already cut out and cleared of its lines: the
+ * band's columns are the group's `x0..x1`, and `group.lines` only say which
+ * line a mark sits on, so they may be lines that carry no ink (the button
+ * tab reader's band centres, src/tab/button-read.ts).
+ */
+export function marksInBand(
+  cv: OpenCv,
+  band: Band,
+  group: LineGroup,
+  size: MarkSize = PRINTED_MARK
+): { readonly marks: Mark[]; readonly short: Mark[] } {
+  const s = group.spacing;
+  const cols = group.x1 - group.x0 + 1;
   const onLines: Mark[] = [];
   for (const box of fretSized(cv, band, cols, group, size)) {
     const y = box.y + band.top;

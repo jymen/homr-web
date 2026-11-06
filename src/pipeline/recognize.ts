@@ -3,7 +3,9 @@
  * chord OCR: one BGR page in, the app server's result shape out. The Worker
  * and the Node golden test both call `recognizePage`; neither has to know
  * what a stage is. Before homr, the tab guard reads line tablature's frets
- * and paints it white, so homr never reads a tab as a staff.
+ * and paints it white, so homr never reads a tab as a staff, and paints out
+ * the push/pull bands of a melodeon button tab and the letter line under
+ * them, so homr reads neither as notes nor chords.
  */
 
 import type { OpenCv } from "../cv/opencv.js";
@@ -13,7 +15,7 @@ import type { Staff } from "../model/staff.js";
 import { ModelError } from "../models/errors.js";
 import type { ModelRole } from "../models/manifest.js";
 import type { ModelSession } from "../models/session.js";
-import { generateMusicXml } from "../musicxml/generate.js";
+import { generateMusicXmlWithColumns } from "../musicxml/generate.js";
 import { ctcCharacters } from "../ocr/ctc.js";
 import { detectTitle, readStripTexts } from "../ocr/page.js";
 import { RapidOcr, recognizeCrops } from "../ocr/rapid-ocr.js";
@@ -30,6 +32,13 @@ import {
 } from "../result.js";
 import { preprocessPage } from "../segmentation/preprocess.js";
 import { DEFAULT_SEGNET_BATCH, segmentPage } from "../segmentation/segment.js";
+import {
+  type DetectedButtonTab,
+  detectButtonTabs,
+  whitenButtonTabs,
+  withStaves,
+} from "../tab/button.js";
+import { type ButtonTabReading, readButtonTabs } from "../tab/button-read.js";
 import {
   type DetectedTab,
   detectTablature,
@@ -274,13 +283,18 @@ async function readPage(
         );
 
   report("xml", 0, 1);
-  const musicXml = generateMusicXml(voices, title, (line) => log.push(line));
+  const { musicXml, noteColumns } = generateMusicXmlWithColumns(
+    voices,
+    title,
+    (line) => log.push(line)
+  );
   report("xml", 1, 1);
   log.push(`Finished parsing ${voices.length} staves`);
   return {
     engine: "browser",
     error: "",
     musicXml,
+    noteColumns,
     ok: true,
     staves,
     texts,
@@ -330,6 +344,14 @@ const describeTabText = ({ capo, tuning }: TabReading): string =>
       : `tuning ${tuning.status === "unknown_name" ? "unknown" : `${tuning.status} ${tuning.strings.join(" ")}`} from ${JSON.stringify(tuning.text)}`,
     capo === undefined ? "no capo" : `capo ${capo.fret}`,
   ].join(", ");
+
+const describeButtonTabs = (tabs: readonly DetectedButtonTab[]): string =>
+  `Button tab guard: ${tabs.length} push/pull bands painted out, under staves ${tabs.map(({ band }) => band.staff ?? "?").join(", ")}`;
+
+const describeButtonReadings = (
+  readings: readonly ButtonTabReading[]
+): string =>
+  `Button tab reader: ${readings.map(({ marks }) => marks.length).join(", ")} marks, ${readings.reduce((sum, { unread }) => sum + unread, 0)} unread`;
 
 const hasTabs = (
   tablature: readonly TabReading[]
@@ -389,15 +411,40 @@ export async function recognizePage(
         `Tab text: ${tablature.map(describeTabText).join("; ")}`
       );
     }
+    const buttonTabs = await detectButtonTabs(
+      engine.cv,
+      page,
+      digitReader(engine, options.signal)
+    );
+    const withoutTabs =
+      read.length === 0 ? page : whitenTablature(page, read, TAB_MARGIN);
     const reading = await readPage(
-      read.length === 0 ? page : whitenTablature(page, read, TAB_MARGIN),
+      buttonTabs.length === 0
+        ? withoutTabs
+        : whitenButtonTabs(withoutTabs, buttonTabs),
       engine,
       log,
       options
     );
+    const placed = withStaves(buttonTabs, reading.staves);
+    // Read off the page as given, as the guard found the bands on it.
+    const buttonReadings = await readButtonTabs(
+      engine.cv,
+      page,
+      placed,
+      digitReader(engine, options.signal),
+      digitClassifier(engine, options.signal)
+    );
+    if (buttonTabs.length > 0) {
+      log.push(
+        describeButtonTabs(placed),
+        describeButtonReadings(buttonReadings)
+      );
+    }
     return {
       ...reading,
       backend: engine.backend,
+      buttonTabs: buttonReadings,
       durationMs: elapsed(),
       log: log.join("\n"),
       tablature,
@@ -446,11 +493,13 @@ export async function recognizeTexts(
     log.push(`Read ${texts.length} texts above ${staves.length} staves`);
     return {
       backend: engine.backend,
+      buttonTabs: [],
       durationMs: Math.round(performance.now() - started),
       engine: "browser",
       error: "",
       log: log.join("\n"),
       musicXml: "",
+      noteColumns: [],
       ok: true,
       staves: [...staves],
       tablature: [],

@@ -262,6 +262,8 @@ class ConversionState {
   readonly division: number;
   lastVoltaMeasure = -10;
   readonly nominator: Ratio;
+  /** The port's own: each `<note>`'s `column`, null where it has none, in the order the notes are built, which is document order. */
+  readonly noteColumns: (number | null)[] = [];
   tremoloState: "start" | "stop" = "stop";
   voltaNumber = 1;
 
@@ -502,6 +504,7 @@ function buildNoteOrRest(
   log: LogLine
 ): XmlElement {
   const note = new XmlElement("note");
+  state.noteColumns.push(symbol.column ?? null);
   if (isChord) {
     note.add(new XmlElement("chord"));
   }
@@ -911,11 +914,16 @@ function addStructure(
 
 const ATTRIBUTE_RHYTHMS = ["clef", "keySignature", "timeSignature"] as const;
 
+interface BuiltPart {
+  readonly measures: XmlElement[];
+  readonly noteColumns: readonly (number | null)[];
+}
+
 function buildMeasures(
   voice: readonly EncodedSymbol[],
   hasTwoStaves: boolean,
   log: LogLine
-): XmlElement[] {
+): BuiltPart {
   const groups = addTupletStartStop(
     sortTokenChords(voice).map((symbols) => ({ symbols, tupletMark: "" }))
   );
@@ -948,7 +956,7 @@ function buildMeasures(
       addStructure(list, symbol, groupNo === groups.length - 1, state, log);
     }
   }
-  return list.finish();
+  return { measures: list.finish(), noteColumns: state.noteColumns };
 }
 
 const partId = (index: number): string => `P${index + 1}`;
@@ -983,6 +991,26 @@ export function generateMusicXml(
   title: string,
   log: LogLine = () => undefined
 ): string {
+  return generateMusicXmlWithColumns(voices, title, log).musicXml;
+}
+
+export interface GeneratedMusicXml {
+  readonly musicXml: string;
+  /** One per `<note>` of `musicXml`, in document order: the note symbol's `column`, or null. */
+  readonly noteColumns: readonly (number | null)[];
+}
+
+/**
+ * generateMusicXml, and each `<note>`'s column beside it. The generator sorts
+ * a chord's tones and splits them by staff and duration, so the symbols'
+ * order is not the notes' order; the columns are collected as each note is
+ * built.
+ */
+export function generateMusicXmlWithColumns(
+  voices: readonly (readonly EncodedSymbol[])[],
+  title: string,
+  log: LogLine = () => undefined
+): GeneratedMusicXml {
   const root = new XmlElement("score-partwise", { version: "4.0" });
   root.add(new XmlElement("work")).add(new XmlElement("work-title", {}, title));
   root
@@ -997,15 +1025,14 @@ export function generateMusicXml(
   for (const [index, hasTwo] of twoStaves.entries()) {
     partList.add(buildScorePart(index, hasTwo));
   }
+  const noteColumns: (number | null)[] = [];
   for (const [index, voice] of voices.entries()) {
     const part = root.add(new XmlElement("part", { id: partId(index) }));
-    for (const measure of buildMeasures(
-      voice,
-      twoStaves[index] ?? false,
-      log
-    )) {
+    const built = buildMeasures(voice, twoStaves[index] ?? false, log);
+    for (const measure of built.measures) {
       part.add(measure);
     }
+    noteColumns.push(...built.noteColumns);
   }
-  return writeXmlDocument(root);
+  return { musicXml: writeXmlDocument(root), noteColumns };
 }

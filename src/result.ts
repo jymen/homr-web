@@ -6,7 +6,14 @@
  * result has no such field. Each of its systems carries the frets read on it.
  */
 
+import type { ButtonTabReading } from "./tab/button-read.js";
 import type { TabReading } from "./tab/read.js";
+
+export type {
+  ButtonTabLetter,
+  ButtonTabMark,
+  ButtonTabReading,
+} from "./tab/button-read.js";
 
 export type { TabSystem } from "./tab/detect.js";
 export type {
@@ -132,8 +139,25 @@ interface ResultBase {
 }
 
 export interface RecognizeSuccess extends ResultBase {
+  /**
+   * The melodeon button tabs (CADB) found under the staves, one per tab top
+   * to bottom, each with its numbers read; empty on a page without any.
+   * Their x is normalised by the page given, as `tablature`'s. Always set by
+   * `recognizePage`; optional so that a caller's hand-written result still
+   * compiles.
+   */
+  readonly buttonTabs?: readonly ButtonTabReading[];
   readonly error: "";
   readonly musicXml: string;
+  /**
+   * One per `<note>` element of `musicXml`, in document order, chord tones
+   * and rests included: the x of the notehead printed for that note,
+   * page-normalised like `staves` (by the preprocessed page's width), or
+   * null where none was tied to it (a rest, a notehead segnet missed, a
+   * grand staff). Empty from `recognizeTexts`. Always set by this library;
+   * optional only so that a caller's hand-written result still compiles.
+   */
+  readonly noteColumns?: readonly (number | null)[];
   readonly ok: true;
   readonly staves: readonly StaffBox[];
   /** The tab systems found, kept out of homr's reading and read on their own, empty on a page without any. Never in `staves`. */

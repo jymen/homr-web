@@ -14,6 +14,9 @@ export type {
 export { createRecognizer } from "./client.js";
 export type {
   Backend,
+  ButtonTabLetter,
+  ButtonTabMark,
+  ButtonTabReading,
   PageText,
   Progress,
   ProgressStage,

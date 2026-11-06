@@ -291,6 +291,25 @@ const withMargin = ([x1, y1, x2, y2]: Region): Region => [
 ];
 
 /**
+ * A canvas x back to page x: `page = scale * canvas + offset`. The resize
+ * onto the canvas, the second crop, the first crop and the page scaling
+ * undone in that order; the dewarp is left out, as it moves no notehead's
+ * x (docs/design/button-tab-findings.md, Numbers).
+ */
+export interface CanvasToPageX {
+  readonly offset: number;
+  readonly scale: number;
+}
+
+export const canvasXToPage = (map: CanvasToPageX, x: number): number =>
+  map.scale * x + map.offset;
+
+export interface PreparedStaff {
+  readonly canvas: StaffCanvas;
+  readonly toPageX: CanvasToPageX;
+}
+
+/**
  * prepare_staff_image without the debug drawing. The staff it returns is
  * the one homr returns: in the coordinates of the first, scaled crop,
  * undewarped, not those of the canvas.
@@ -301,6 +320,16 @@ export function prepareStaffImage(
   page: GrayImage,
   regions: StaffRegions
 ): StaffCanvas {
+  return prepareStaffImageAndPageX(cv, staff, page, regions).canvas;
+}
+
+/** prepareStaffImage, and the map from its canvas's x back to the page's. */
+export function prepareStaffImageAndPageX(
+  cv: OpenCv,
+  staff: Staff,
+  page: GrayImage,
+  regions: StaffRegions
+): PreparedStaff {
   const region = staffRegion(staff, regions);
   const size = trOmrCanvasSize(region[3] - region[1], region[2] - region[0]);
   const scaling = size.height / (region[3] - region[1]);
@@ -326,7 +355,13 @@ export function prepareStaffImage(
     step2.plane,
     moved.averageUnitSize
   );
-  return createStaffCanvas(centerImageOnCanvas(cv, cleaned, size), moved);
+  return {
+    canvas: createStaffCanvas(centerImageOnCanvas(cv, cleaned, size), moved),
+    toPageX: {
+      offset: (step1.left + step2.left) / scaling,
+      scale: cleaned.width / (size.width * scaling),
+    },
+  };
 }
 
 /**

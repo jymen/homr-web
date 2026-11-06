@@ -24,6 +24,14 @@ import {
 interface SymbolFields<R extends string, A extends string, S extends string> {
   readonly articulation: A;
   /**
+   * The port's own, not homr's: the page-normalised x (by the preprocessed
+   * page's width, like StaffBox) of the notehead column this note was
+   * aligned with (src/pipeline/note-columns.ts). Absent on every symbol
+   * that is not a note, and on a note the alignment left unpaired. Spreads
+   * carry it, as they carry `coordinates`; sameSymbol ignores it.
+   */
+  readonly column?: number;
+  /**
    * Where the decoder was looking when it emitted the symbol, in encoder
    * canvas pixels (1280 x 256). Attention, not localisation: monotonic in
    * raster order when trustworthy, and null for symbols the port creates

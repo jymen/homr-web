@@ -18,6 +18,14 @@
 // (colon-separated). Rerun after editing PAGES:
 //   TAB_FONT_DIRS=/path/to/texgyrebonum node tools/typeset-tab.mjs
 // The output is byte-identical from run to run.
+//
+// The same run typesets the melodeon button tab (CADB) pages in
+// test/fixtures/button-tab/ from BUTTON_TUNE: the staff is abcjs's, rendered
+// by headless Chrome (CHROME, default the macOS app) from ABCJS_FILE (default
+// the app checkout's abcjs 6.6.4 beside this repository), and the P/T bands,
+// button numbers and left-hand letters are drawn here under each note head's
+// column, measured the same way. Its truth.json holds one ButtonTabReading
+// (docs/homr-web-plan/button-tab.md, H2) per staff.
 import { execFileSync } from "node:child_process";
 import {
   mkdirSync,
@@ -66,6 +74,7 @@ const TRUTH_KEYS = [
   "systems",
   "lines",
   "spacing",
+  "staff",
   "top",
   "events",
   "x",
@@ -81,6 +90,23 @@ const TRUTH_KEYS = [
   "expect",
   "status",
   "strings",
+  "rotation",
+  "keyboard",
+  "staves",
+  "buttonTabs",
+  "x0",
+  "x1",
+  "bottom",
+  "bandTop",
+  "rule",
+  "bandBottom",
+  "marks",
+  "bellows",
+  "button",
+  "row",
+  "held",
+  "leftHand",
+  "unread",
 ];
 const LINE_WIDTH = 80;
 
@@ -784,6 +810,445 @@ function toGrayPng(rgba) {
   );
 }
 
+// Melodeon button tab (CADB): a treble staff with two bands under it, P (push)
+// above T (pull), split by one rule, and a line of left-hand letters under T.
+
+const buttonOutDir = join(root, "test/fixtures/button-tab");
+const ABCJS_FILE =
+  process.env.ABCJS_FILE ??
+  join(
+    root,
+    "../AbcMusicStudioSvelte/node_modules/abcjs/dist/abcjs-basic-min.js"
+  );
+const CHROME =
+  process.env.CHROME ??
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+const BUTTON_STAFFWIDTH = 700;
+/** Band and letter-line geometry, in staff spacings. */
+const BAND = {
+  /** From the staff's bottom line to the top of the P band. */
+  gap: 3.4,
+  /** One band's height. */
+  height: 2,
+  /** From the bottom of the T band to the centre of the letter line. */
+  letters: 1.3,
+  /** From the letter line's centre to the next staff's top line. */
+  next: 6.8,
+};
+/** A button number's digits are this share of a band tall. */
+const BUTTON_DIGIT_HEIGHT = 0.62;
+const BAND_RULE = 2;
+const BAND_BAR = 2;
+const BUTTON_FIRST_TOP = 560;
+const MARK_TOKEN = /^([PT])(\d{1,2})('{0,2})(-?)$/;
+const LETTER_TOKEN = /^[A-G]$/;
+const DUMP_OUT = /<pre id="out">([^<]+)<\/pre>/;
+const BUTTON_PAGES = [
+  { file: "gc-cadb-straight.png", rotation: 0 },
+  { file: "gc-cadb-rotated.png", rotation: 0.3 },
+];
+
+/**
+ * An original waltz for a three-row G/C melodeon (the app's melodeonGC3:
+ * G row outer, C row ', accidentals row ''), every button sounding the staff
+ * note on its bellows. One ABC line per system. `tab` holds one token per note
+ * head, bar by bar: P or T, the button as printed and its suffix, or "." for a
+ * note with no number. `bass` holds the left hand's letter or "." per note.
+ */
+const BUTTON_TUNE = {
+  abc: "X:1\nM:3/4\nL:1/8\n%%stretchlast true\nK:C\n",
+  keyboard: "melodeonGC3",
+  systems: [
+    {
+      abc: "c2 e2 g2 | d2 B2 G2 | Acf a3 | g6 |",
+      bass: "C C C | G G G | F . F . | C",
+      tab: "P6' P7' P8' | T7' T6' T3'' | T5' T8 T8' T9' | P8'-",
+    },
+    {
+      abc: "edc def | g2 b2 d'2 | c'2 ba g2 | ^f2 d4 |",
+      bass: "C . C . G . | G G G | C G . C | D G",
+      tab: "P7' T7' P6' T7' P7' T8' | P9 P10 P11 | P9' T10' T9' P8' | T10 T7'-",
+    },
+    {
+      abc: "a2 ^g2 a2 | fed cBA | G2 B2 d2 | c6 |]",
+      bass: "A E A | F . C . G . | G G G | C",
+      tab: "T9' P7'' T9' | T8' P7' T7' P6' T6' T7 | . P7 P8 | P6'-",
+    },
+  ],
+  title: "homr-web button tab fixture: G/C melodeon, CADB",
+};
+
+const bars = (text) =>
+  text.split("|").map((bar) => bar.trim().split(WHITESPACE));
+
+function parseButtonSystem(system) {
+  const tab = bars(system.tab).map((bar) =>
+    bar.map((token) => {
+      if (token === ".") {
+        return null;
+      }
+      const match = token.match(MARK_TOKEN);
+      if (match === null) {
+        throw new Error(`bad button mark ${token}`);
+      }
+      const [, bellows, button, row, held] = match;
+      return {
+        bellows: bellows === "P" ? "push" : "pull",
+        button: Number(button),
+        digits: button,
+        held: held === "-",
+        row: row.length,
+        text: token.slice(1),
+      };
+    })
+  );
+  const bass = bars(system.bass).map((bar) =>
+    bar.map((token) => {
+      if (token !== "." && !LETTER_TOKEN.test(token)) {
+        throw new Error(`bad left-hand letter ${token}`);
+      }
+      return token === "." ? null : token;
+    })
+  );
+  return { bass, tab };
+}
+
+/** Renders the tune with abcjs in headless Chrome and reads back each line's staff, bars, note heads and markup. */
+function renderWithAbcjs(abc, work) {
+  const html = join(work, "button-tab.html");
+  writeFileSync(join(work, "abcjs.js"), readFileSync(ABCJS_FILE));
+  writeFileSync(
+    html,
+    `<!doctype html><html><body><div id="score"></div><pre id="out"></pre>
+<script src="abcjs.js"></script>
+<script>
+"use strict";
+ABCJS.renderAbc("score", ${JSON.stringify(abc)}, { add_classes: true, staffwidth: ${BUTTON_STAFFWIDTH} });
+const svg = document.querySelector("#score svg");
+const box = (el) => { const b = el.getBBox(); return { h: b.height, w: b.width, x: b.x, y: b.y }; };
+const numberOf = (el, prefix) => Number([...el.classList].find((c) => c.startsWith(prefix) && /^\\d+$/.test(c.slice(prefix.length))).slice(prefix.length));
+const lines = [...svg.querySelectorAll("g.abcjs-staff-wrapper")].map((wrapper) => ({
+  bars: [...wrapper.querySelectorAll("g.abcjs-bar")].map(box),
+  line: numberOf(wrapper, "abcjs-l"),
+  notes: [...wrapper.querySelectorAll("g.abcjs-note")].map((g) => ({ heads: [...g.querySelectorAll(".abcjs-notehead")].map(box), m: numberOf(g, "abcjs-m") })),
+  staffLines: [...wrapper.querySelectorAll("g.abcjs-staff path")].map(box),
+  svg: new XMLSerializer().serializeToString(wrapper),
+}));
+document.getElementById("out").textContent = btoa(unescape(encodeURIComponent(JSON.stringify(lines))));
+</script></body></html>`
+  );
+  const dom = execFileSync(
+    CHROME,
+    [
+      "--headless=new",
+      "--disable-gpu",
+      "--no-first-run",
+      "--no-default-browser-check",
+      `--user-data-dir=${join(work, "chrome")}`,
+      "--virtual-time-budget=10000",
+      "--dump-dom",
+      `file://${html}`,
+    ],
+    {
+      encoding: "utf8",
+      maxBuffer: 64 * 1024 * 1024,
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 120_000,
+    }
+  );
+  const encoded = dom.match(DUMP_OUT)?.[1];
+  if (encoded === undefined) {
+    throw new Error("abcjs rendered nothing: check ABCJS_FILE and CHROME");
+  }
+  return JSON.parse(Buffer.from(encoded, "base64").toString("utf8"));
+}
+
+/** Pairs each note head of a line with its tab token and letter, bar by bar, refusing any count that disagrees. */
+function notesWithTab(line, parsed, index) {
+  const measures = [...new Set(line.notes.map((note) => note.m))].sort(
+    (a, b) => a - b
+  );
+  if (
+    measures.length !== parsed.tab.length ||
+    measures.length !== parsed.bass.length
+  ) {
+    throw new Error(
+      `system ${index + 1}: ${measures.length} bars drawn, ${parsed.tab.length} in tab, ${parsed.bass.length} in bass`
+    );
+  }
+  return measures.flatMap((m, bar) => {
+    const notes = line.notes.filter((note) => note.m === m);
+    if (
+      notes.length !== parsed.tab[bar].length ||
+      notes.length !== parsed.bass[bar].length
+    ) {
+      throw new Error(
+        `system ${index + 1} bar ${bar + 1}: ${notes.length} notes, ${parsed.tab[bar].length} tab tokens, ${parsed.bass[bar].length} letters`
+      );
+    }
+    return notes.map((note, k) => {
+      if (note.heads.length !== 1) {
+        throw new Error(
+          `system ${index + 1} bar ${bar + 1}: one head per note`
+        );
+      }
+      const [head] = note.heads;
+      return {
+        letter: parsed.bass[bar][k],
+        mark: parsed.tab[bar][k],
+        x: head.x + head.w / 2,
+      };
+    });
+  });
+}
+
+function buttonGlyphs(systems, spacing, work, env) {
+  const bandHeight = BAND.height * spacing;
+  const [probe] = measure(
+    [{ family: SANS, size: 100, text: "0", weight: "normal" }],
+    work,
+    env
+  );
+  const size =
+    Math.round(
+      ((BUTTON_DIGIT_HEIGHT * bandHeight) / (probe.b - probe.t)) * 1000
+    ) / 10;
+  const texts = new Set();
+  const letters = new Set();
+  for (const system of systems) {
+    for (const mark of system.parsed.tab.flat()) {
+      if (mark !== null) {
+        texts.add(mark.text);
+        texts.add(mark.digits);
+      }
+    }
+    for (const letter of system.parsed.bass.flat()) {
+      if (letter !== null) {
+        letters.add(letter);
+      }
+    }
+  }
+  const labels = [
+    ...[...texts].map((text) => ({ size, text, weight: "normal" })),
+    ...[...letters].map((text) => ({ size, text, weight: "normal" })),
+    ...["P", "T"].map((text) => ({ size, text, weight: "bold" })),
+  ].map((label) => ({ ...label, family: SANS }));
+  const boxes = measure(labels, work, env);
+  const byText = new Map();
+  for (const [index, label] of labels.entries()) {
+    byText.set(`${label.weight}:${label.text}`, {
+      box: boxes[index],
+      label,
+      runs: [{ dx: 0, label }],
+    });
+  }
+  return (text, weight = "normal") => byText.get(`${weight}:${text}`);
+}
+
+/** Draws a button number with its digits' ink centred on (cx, cy), the suffix trailing; x is the digits' ink centre. */
+function placeMark(glyph, mark, cx, cy) {
+  const digits = glyph(mark.digits).box;
+  const full = glyph(mark.text);
+  const ax = Math.round(cx - (digits.l + digits.r) / 2);
+  const ay = Math.round(cy - (digits.t + digits.b) / 2);
+  return {
+    l: ax + full.box.l,
+    r: ax + full.box.r,
+    svg: textElement(full.label, ax, ay),
+    x: ax + (digits.l + digits.r) / 2,
+  };
+}
+
+function rotatePoint(x, y, degrees) {
+  const angle = (degrees * Math.PI) / 180;
+  const dx = x - WIDTH / 2;
+  const dy = y - HEIGHT / 2;
+  return {
+    x: WIDTH / 2 + dx * Math.cos(angle) - dy * Math.sin(angle),
+    y: HEIGHT / 2 + dx * Math.sin(angle) + dy * Math.cos(angle),
+  };
+}
+
+const norm = (value, size) => Math.round((value / size) * 1e6) / 1e6;
+
+function layoutButtonSystem(system, index, scale, top, glyph) {
+  const { line, parsed } = system;
+  const staffLeft = Math.min(...line.staffLines.map((b) => b.x));
+  const lineY = line.staffLines.map((b) => b.y + b.h / 2).sort((a, b) => a - b);
+  const spacing = ((lineY[4] - lineY[0]) / 4) * scale;
+  const tx = SYSTEM_X0 - scale * staffLeft;
+  const ty = top - scale * lineY[0];
+  const pageX = (x) => tx + scale * x;
+  const bottom = top + 4 * spacing;
+  const bandTop = Math.round(bottom + BAND.gap * spacing);
+  const rule = Math.round(bandTop + BAND.height * spacing);
+  const bandBottom = Math.round(rule + BAND.height * spacing);
+  const lettersY = bandBottom + BAND.letters * spacing;
+  const svg = [
+    `<g transform="translate(${tx} ${ty}) scale(${scale})">${line.svg}</g>`,
+    `<rect x="${SYSTEM_X0}" y="${rule - BAND_RULE / 2}" width="${SYSTEM_X1 - SYSTEM_X0}" height="${BAND_RULE}" fill="#000"/>`,
+  ];
+  // The last bar closes the band at the staff's right end, also under a final |], whose box is thin and thick bars together.
+  const barXs = [
+    SYSTEM_X0 + BAND_BAR / 2,
+    ...line.bars.slice(0, -1).map((b) => pageX(b.x + b.w / 2)),
+    SYSTEM_X1 - BAND_BAR / 2,
+  ];
+  for (const x of barXs) {
+    svg.push(
+      `<rect x="${Math.round(x - BAND_BAR / 2)}" y="${bandTop}" width="${BAND_BAR}" height="${bandBottom - bandTop}" fill="#000"/>`
+    );
+  }
+  for (const [letter, cy] of [
+    ["P", (bandTop + rule) / 2],
+    ["T", (rule + bandBottom) / 2],
+  ]) {
+    svg.push(
+      placed(glyph(letter, "bold"), SYSTEM_X0 - 0.9 * BAND.height * spacing, cy)
+        .svg
+    );
+  }
+  const marks = [];
+  const leftHand = [];
+  const lastRight = { pull: -1, push: -1 };
+  for (const note of notesWithTab(line, parsed, index)) {
+    const cx = pageX(note.x);
+    if (note.mark !== null) {
+      const { bellows } = note.mark;
+      const cy =
+        bellows === "push" ? (bandTop + rule) / 2 : (rule + bandBottom) / 2;
+      const drawn = placeMark(glyph, note.mark, cx, cy);
+      if (drawn.l - lastRight[bellows] < 6) {
+        throw new Error(
+          `system ${index + 1}: ${note.mark.text} touches the mark before it`
+        );
+      }
+      lastRight[bellows] = drawn.r;
+      svg.push(drawn.svg);
+      marks.push({
+        bellows,
+        button: note.mark.button,
+        held: note.mark.held,
+        row: note.mark.row,
+        x: drawn.x,
+        y: cy,
+      });
+    }
+    if (note.letter !== null) {
+      const drawn = placed(glyph(note.letter), cx, lettersY);
+      svg.push(drawn.svg);
+      leftHand.push({ text: note.letter, x: drawn.x, y: lettersY });
+    }
+  }
+  return {
+    geometry: { bandBottom, bandTop, bottom, rule, top },
+    leftHand,
+    marks,
+    next: lettersY + BAND.next * spacing,
+    svg: svg.join("\n"),
+  };
+}
+
+/** One system's truth on a page turned by `rotation` degrees about its centre. */
+function buttonTruth(laid, index, rotation) {
+  const at = (x, y) => rotatePoint(x, y, rotation);
+  const { bandBottom, bandTop, bottom, rule, top } = laid.geometry;
+  const midY = (bandTop + bandBottom) / 2;
+  const midX = (SYSTEM_X0 + SYSTEM_X1) / 2;
+  const pageY = (value) => norm(at(midX, value).y, HEIGHT);
+  return {
+    reading: {
+      leftHand: laid.leftHand.map((item) => ({
+        text: item.text,
+        x: norm(at(item.x, item.y).x, WIDTH),
+      })),
+      marks: laid.marks.map((mark) => ({
+        bellows: mark.bellows,
+        button: mark.button,
+        held: mark.held,
+        row: mark.row,
+        x: norm(at(mark.x, mark.y).x, WIDTH),
+      })),
+      staff: index,
+      unread: 0,
+    },
+    staff: {
+      bandBottom: pageY(bandBottom),
+      bandTop: pageY(bandTop),
+      bottom: pageY(bottom),
+      rule: pageY(rule),
+      staff: index,
+      top: pageY(top),
+      x0: norm(at(SYSTEM_X0, midY).x, WIDTH),
+      x1: norm(at(SYSTEM_X1, midY).x, WIDTH),
+    },
+  };
+}
+
+function typesetButtonPages(work, env) {
+  const abc = `${BUTTON_TUNE.abc}${BUTTON_TUNE.systems.map((s) => s.abc).join("\n")}\n`;
+  const lines = renderWithAbcjs(abc, work).sort((a, b) => a.line - b.line);
+  if (lines.length !== BUTTON_TUNE.systems.length) {
+    throw new Error(
+      `abcjs drew ${lines.length} lines for ${BUTTON_TUNE.systems.length} systems`
+    );
+  }
+  const widths = lines.map((line) => {
+    const xs = line.staffLines.flatMap((b) => [b.x, b.x + b.w]);
+    return Math.max(...xs) - Math.min(...xs);
+  });
+  if (Math.max(...widths) - Math.min(...widths) > 0.5) {
+    throw new Error(`abcjs lines differ in width: ${widths.join(", ")}`);
+  }
+  const scale = (SYSTEM_X1 - SYSTEM_X0) / widths[0];
+  const systems = BUTTON_TUNE.systems.map((spec, index) => ({
+    line: lines[index],
+    parsed: parseButtonSystem(spec),
+  }));
+  const firstLines = lines[0].staffLines.map((b) => b.y).sort((a, b) => a - b);
+  const spacing = ((firstLines[4] - firstLines[0]) / 4) * scale;
+  const glyph = buttonGlyphs(systems, spacing, work, env);
+  let top = BUTTON_FIRST_TOP;
+  const laid = systems.map((system, index) => {
+    const result = layoutButtonSystem(system, index, scale, top, glyph);
+    top = Math.round(result.next);
+    return result;
+  });
+  if (top > HEIGHT - 200) {
+    throw new Error(`button tab page overflows by ${top - HEIGHT + 200} px`);
+  }
+  mkdirSync(buttonOutDir, { recursive: true });
+  const title = `<text x="${SYSTEM_X0}" y="220" font-family="${SANS}" font-size="44">${escapeXml(BUTTON_TUNE.title)}</text>`;
+  const body = `${title}\n${laid.map((system) => system.svg).join("\n")}`;
+  const pages = BUTTON_PAGES.map((page) => {
+    const content =
+      page.rotation === 0
+        ? body
+        : `<g transform="rotate(${page.rotation} ${WIDTH / 2} ${HEIGHT / 2})">${body}</g>`;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${WIDTH}" height="${HEIGHT}"><rect width="100%" height="100%" fill="#fff"/>\n${content}\n</svg>`;
+    const png = toGrayPng(
+      rasterise(svg, work, env, page.file.replace(PNG_SUFFIX, ""))
+    );
+    writeFileSync(join(buttonOutDir, page.file), png);
+    console.log(`${page.file}: ${png.length} bytes, ${laid.length} systems`);
+    const truths = laid.map((system, index) =>
+      buttonTruth(system, index, page.rotation)
+    );
+    return {
+      buttonTabs: truths.map((truth) => truth.reading),
+      file: page.file,
+      height: HEIGHT,
+      rotation: page.rotation,
+      staves: truths.map((truth) => truth.staff),
+      width: WIDTH,
+    };
+  });
+  writeFileSync(
+    join(buttonOutDir, "truth.json"),
+    `${toJson({ generator: "tools/typeset-tab.mjs", keyboard: BUTTON_TUNE.keyboard, pages })}\n`
+  );
+}
+
 const scratch = mkdtempSync(join(tmpdir(), "typeset-tab-"));
 try {
   const env = fontConfig(scratch);
@@ -821,6 +1286,7 @@ try {
     join(outDir, "truth.json"),
     `${toJson({ generator: "tools/typeset-tab.mjs", headers, pages: truthPages })}\n`
   );
+  typesetButtonPages(scratch, env);
 } finally {
   rmSync(scratch, { force: true, recursive: true });
 }

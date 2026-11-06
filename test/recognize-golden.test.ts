@@ -22,6 +22,7 @@ import { CPU, describeWithModels, storeOn } from "./support/models.js";
 import { testOpenCv } from "./support/opencv.js";
 
 const PAGE_TIMEOUT_MS = 900_000;
+const NOTE_ELEMENT = /<note[ >][\s\S]*?<\/note>/g;
 /** Phase 5: the port's staffs agree with homr's to 2.5e-4 px from its own boxes; normalised by a 1920-px page that is far below 1e-6. */
 const STAFF_DIGITS = 6;
 /** test/ocr-golden.test.ts's tolerances, whose header gives the measured drift behind them. */
@@ -54,6 +55,15 @@ describeWithModels("recognizePage from the fixture PNG", () => {
           expect(canonicalXml(result.musicXml)).toEqual(
             canonicalXml(reader.text("page.musicxml"))
           );
+          // The port's own addition: one column per <note>, every pitched one placed on a single staff.
+          const notes = [...result.musicXml.matchAll(NOTE_ELEMENT)];
+          const columns = result.ok ? (result.noteColumns ?? []) : [];
+          expect(columns).toHaveLength(notes.length);
+          if (fixture.name === "the-kesh-300dpi") {
+            for (const [k, [element]] of notes.entries()) {
+              expect(columns[k] === null).toBe(!element.includes("<pitch>"));
+            }
+          }
           const want = JSON.parse(reader.text("staves.json")) as {
             cx: number;
             cy: number;

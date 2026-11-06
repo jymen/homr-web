@@ -1,0 +1,726 @@
+{
+  "generator": "tools/typeset-tab.mjs",
+  "pages": [
+    {
+      "file": "gc-cadb-straight.png",
+      "width": 2480,
+      "height": 3508,
+      "rotation": 0,
+      "staves": [
+        {
+          "staff": 0,
+          "top": 0.159635,
+          "x0": 0.080645,
+          "x1": 0.919355,
+          "bottom": 0.185893,
+          "bandTop": 0.208096,
+          "rule": 0.221209,
+          "bandBottom": 0.234322
+        },
+        {
+          "staff": 1,
+          "top": 0.287628,
+          "x0": 0.080645,
+          "x1": 0.919355,
+          "bottom": 0.313887,
+          "bandTop": 0.336089,
+          "rule": 0.349202,
+          "bandBottom": 0.362315
+        },
+        {
+          "staff": 2,
+          "top": 0.415621,
+          "x0": 0.080645,
+          "x1": 0.919355,
+          "bottom": 0.44188,
+          "bandTop": 0.464082,
+          "rule": 0.477195,
+          "bandBottom": 0.490308
+        }
+      ],
+      "buttonTabs": [
+        {
+          "staff": 0,
+          "marks": [
+            {
+              "x": 0.153427,
+              "bellows": "push",
+              "button": 6,
+              "row": 1,
+              "held": false
+            },
+            {
+              "x": 0.219556,
+              "bellows": "push",
+              "button": 7,
+              "row": 1,
+              "held": false
+            },
+            {
+              "x": 0.285484,
+              "bellows": "push",
+              "button": 8,
+              "row": 1,
+              "held": false
+            },
+            {
+              "x": 0.364718,
+              "bellows": "pull",
+              "button": 7,
+              "row": 1,
+              "held": false
+            },
+            {
+              "x": 0.430444,
+              "bellows": "pull",
+              "button": 6,
+              "row": 1,
+              "held": false
+            },
+            {
+              "x": 0.496573,
+              "bellows": "pull",
+              "button": 3,
+              "row": 2,
+              "held": false
+            },
+            {
+              "x": 0.575605,
+              "bellows": "pull",
+              "button": 5,
+              "row": 1,
+              "held": false
+            },
+            {
+              "x": 0.622581,
+              "bellows": "pull",
+              "button": 8,
+              "row": 0,
+              "held": false
+            },
+            {
+              "x": 0.668952,
+              "bellows": "pull",
+              "button": 8,
+              "row": 1,
+              "held": false
+            },
+            {
+              "x": 0.715927,
+              "bellows": "pull",
+              "button": 9,
+              "row": 1,
+              "held": false
+            },
+            {
+              "x": 0.810081,
+              "bellows": "push",
+              "button": 8,
+              "row": 1,
+              "held": true
+            }
+          ],
+          "leftHand": [
+            { "x": 0.153629, "text": "C" },
+            { "x": 0.219355, "text": "C" },
+            { "x": 0.285484, "text": "C" },
+            { "x": 0.364516, "text": "G" },
+            { "x": 0.430645, "text": "G" },
+            { "x": 0.496774, "text": "G" },
+            { "x": 0.575605, "text": "F" },
+            { "x": 0.669153, "text": "F" },
+            { "x": 0.810081, "text": "C" }
+          ],
+          "unread": 0
+        },
+        {
+          "staff": 1,
+          "marks": [
+            {
+              "x": 0.127218,
+              "bellows": "push",
+              "button": 7,
+              "row": 1,
+              "held": false
+            },
+            {
+              "x": 0.16754,
+              "bellows": "pull",
+              "button": 7,
+              "row": 1,
+              "held": false
+            },
+            {
+              "x": 0.20746,
+              "bellows": "push",
+              "button": 6,
+              "row": 1,
+              "held": false
+            },
+            {
+              "x": 0.247379,
+              "bellows": "pull",
+              "button": 7,
+              "row": 1,
+              "held": false
+            },
+            {
+              "x": 0.287298,
+              "bellows": "push",
+              "button": 7,
+              "row": 1,
+              "held": false
+            },
+            {
+              "x": 0.327419,
+              "bellows": "pull",
+              "button": 8,
+              "row": 1,
+              "held": false
+            },
+            {
+              "x": 0.380847,
+              "bellows": "push",
+              "button": 9,
+              "row": 0,
+              "held": false
+            },
+            {
+              "x": 0.437298,
+              "bellows": "push",
+              "button": 10,
+              "row": 0,
+              "held": false
+            },
+            {
+              "x": 0.49375,
+              "bellows": "push",
+              "button": 11,
+              "row": 0,
+              "held": false
+            },
+            {
+              "x": 0.563911,
+              "bellows": "push",
+              "button": 9,
+              "row": 1,
+              "held": false
+            },
+            {
+              "x": 0.620363,
+              "bellows": "pull",
+              "button": 10,
+              "row": 1,
+              "held": false
+            },
+            {
+              "x": 0.660282,
+              "bellows": "pull",
+              "button": 9,
+              "row": 1,
+              "held": false
+            },
+            {
+              "x": 0.700403,
+              "bellows": "push",
+              "button": 8,
+              "row": 1,
+              "held": false
+            },
+            {
+              "x": 0.787298,
+              "bellows": "pull",
+              "button": 10,
+              "row": 0,
+              "held": false
+            },
+            {
+              "x": 0.844153,
+              "bellows": "pull",
+              "button": 7,
+              "row": 1,
+              "held": true
+            }
+          ],
+          "leftHand": [
+            { "x": 0.127419, "text": "C" },
+            { "x": 0.207258, "text": "C" },
+            { "x": 0.2875, "text": "G" },
+            { "x": 0.380645, "text": "G" },
+            { "x": 0.4375, "text": "G" },
+            { "x": 0.493952, "text": "G" },
+            { "x": 0.56371, "text": "C" },
+            { "x": 0.620161, "text": "G" },
+            { "x": 0.700403, "text": "C" },
+            { "x": 0.7875, "text": "D" },
+            { "x": 0.844355, "text": "G" }
+          ],
+          "unread": 0
+        },
+        {
+          "staff": 2,
+          "marks": [
+            {
+              "x": 0.127218,
+              "bellows": "pull",
+              "button": 9,
+              "row": 1,
+              "held": false
+            },
+            {
+              "x": 0.189718,
+              "bellows": "push",
+              "button": 7,
+              "row": 2,
+              "held": false
+            },
+            {
+              "x": 0.252218,
+              "bellows": "pull",
+              "button": 9,
+              "row": 1,
+              "held": false
+            },
+            {
+              "x": 0.328226,
+              "bellows": "pull",
+              "button": 8,
+              "row": 1,
+              "held": false
+            },
+            {
+              "x": 0.372379,
+              "bellows": "push",
+              "button": 7,
+              "row": 1,
+              "held": false
+            },
+            {
+              "x": 0.416734,
+              "bellows": "pull",
+              "button": 7,
+              "row": 1,
+              "held": false
+            },
+            {
+              "x": 0.460685,
+              "bellows": "push",
+              "button": 6,
+              "row": 1,
+              "held": false
+            },
+            {
+              "x": 0.50504,
+              "bellows": "pull",
+              "button": 6,
+              "row": 1,
+              "held": false
+            },
+            {
+              "x": 0.549395,
+              "bellows": "pull",
+              "button": 7,
+              "row": 0,
+              "held": false
+            },
+            {
+              "x": 0.669153,
+              "bellows": "push",
+              "button": 7,
+              "row": 0,
+              "held": false
+            },
+            {
+              "x": 0.731855,
+              "bellows": "push",
+              "button": 8,
+              "row": 0,
+              "held": false
+            },
+            {
+              "x": 0.807863,
+              "bellows": "push",
+              "button": 6,
+              "row": 1,
+              "held": true
+            }
+          ],
+          "leftHand": [
+            { "x": 0.127419, "text": "A" },
+            { "x": 0.189919, "text": "E" },
+            { "x": 0.252419, "text": "A" },
+            { "x": 0.328024, "text": "F" },
+            { "x": 0.416532, "text": "C" },
+            { "x": 0.504839, "text": "G" },
+            { "x": 0.606452, "text": "G" },
+            { "x": 0.668952, "text": "G" },
+            { "x": 0.731855, "text": "G" },
+            { "x": 0.807661, "text": "C" }
+          ],
+          "unread": 0
+        }
+      ]
+    },
+    {
+      "file": "gc-cadb-rotated.png",
+      "width": 2480,
+      "height": 3508,
+      "rotation": 0.3,
+      "staves": [
+        {
+          "staff": 0,
+          "top": 0.15964,
+          "x0": 0.082716,
+          "x1": 0.921414,
+          "bottom": 0.185898,
+          "bandTop": 0.2081,
+          "rule": 0.221212,
+          "bandBottom": 0.234325
+        },
+        {
+          "staff": 1,
+          "top": 0.287631,
+          "x0": 0.081768,
+          "x1": 0.920466,
+          "bottom": 0.313889,
+          "bandTop": 0.336091,
+          "rule": 0.349204,
+          "bandBottom": 0.362317
+        },
+        {
+          "staff": 2,
+          "top": 0.415623,
+          "x0": 0.08082,
+          "x1": 0.919518,
+          "bottom": 0.441881,
+          "bandTop": 0.464083,
+          "rule": 0.477195,
+          "bandBottom": 0.490308
+        }
+      ],
+      "buttonTabs": [
+        {
+          "staff": 0,
+          "marks": [
+            {
+              "x": 0.155546,
+              "bellows": "push",
+              "button": 6,
+              "row": 1,
+              "held": false
+            },
+            {
+              "x": 0.221674,
+              "bellows": "push",
+              "button": 7,
+              "row": 1,
+              "held": false
+            },
+            {
+              "x": 0.2876,
+              "bellows": "push",
+              "button": 8,
+              "row": 1,
+              "held": false
+            },
+            {
+              "x": 0.366736,
+              "bellows": "pull",
+              "button": 7,
+              "row": 1,
+              "held": false
+            },
+            {
+              "x": 0.432461,
+              "bellows": "pull",
+              "button": 6,
+              "row": 1,
+              "held": false
+            },
+            {
+              "x": 0.498589,
+              "bellows": "pull",
+              "button": 3,
+              "row": 2,
+              "held": false
+            },
+            {
+              "x": 0.57762,
+              "bellows": "pull",
+              "button": 5,
+              "row": 1,
+              "held": false
+            },
+            {
+              "x": 0.624595,
+              "bellows": "pull",
+              "button": 8,
+              "row": 0,
+              "held": false
+            },
+            {
+              "x": 0.670966,
+              "bellows": "pull",
+              "button": 8,
+              "row": 1,
+              "held": false
+            },
+            {
+              "x": 0.717941,
+              "bellows": "pull",
+              "button": 9,
+              "row": 1,
+              "held": false
+            },
+            {
+              "x": 0.81219,
+              "bellows": "push",
+              "button": 8,
+              "row": 1,
+              "held": true
+            }
+          ],
+          "leftHand": [
+            { "x": 0.155538, "text": "C" },
+            { "x": 0.221263, "text": "C" },
+            { "x": 0.287391, "text": "C" },
+            { "x": 0.366422, "text": "G" },
+            { "x": 0.432551, "text": "G" },
+            { "x": 0.498679, "text": "G" },
+            { "x": 0.577508, "text": "F" },
+            { "x": 0.671055, "text": "F" },
+            { "x": 0.811981, "text": "C" }
+          ],
+          "unread": 0
+        },
+        {
+          "staff": 1,
+          "marks": [
+            {
+              "x": 0.128388,
+              "bellows": "push",
+              "button": 7,
+              "row": 1,
+              "held": false
+            },
+            {
+              "x": 0.168613,
+              "bellows": "pull",
+              "button": 7,
+              "row": 1,
+              "held": false
+            },
+            {
+              "x": 0.208629,
+              "bellows": "push",
+              "button": 6,
+              "row": 1,
+              "held": false
+            },
+            {
+              "x": 0.248451,
+              "bellows": "pull",
+              "button": 7,
+              "row": 1,
+              "held": false
+            },
+            {
+              "x": 0.288467,
+              "bellows": "push",
+              "button": 7,
+              "row": 1,
+              "held": false
+            },
+            {
+              "x": 0.32849,
+              "bellows": "pull",
+              "button": 8,
+              "row": 1,
+              "held": false
+            },
+            {
+              "x": 0.382014,
+              "bellows": "push",
+              "button": 9,
+              "row": 0,
+              "held": false
+            },
+            {
+              "x": 0.438465,
+              "bellows": "push",
+              "button": 10,
+              "row": 0,
+              "held": false
+            },
+            {
+              "x": 0.494916,
+              "bellows": "push",
+              "button": 11,
+              "row": 0,
+              "held": false
+            },
+            {
+              "x": 0.565076,
+              "bellows": "push",
+              "button": 9,
+              "row": 1,
+              "held": false
+            },
+            {
+              "x": 0.62143,
+              "bellows": "pull",
+              "button": 10,
+              "row": 1,
+              "held": false
+            },
+            {
+              "x": 0.661348,
+              "bellows": "pull",
+              "button": 9,
+              "row": 1,
+              "held": false
+            },
+            {
+              "x": 0.701566,
+              "bellows": "push",
+              "button": 8,
+              "row": 1,
+              "held": false
+            },
+            {
+              "x": 0.788363,
+              "bellows": "pull",
+              "button": 10,
+              "row": 0,
+              "held": false
+            },
+            {
+              "x": 0.845217,
+              "bellows": "pull",
+              "button": 7,
+              "row": 1,
+              "held": true
+            }
+          ],
+          "leftHand": [
+            { "x": 0.128381, "text": "C" },
+            { "x": 0.208219, "text": "C" },
+            { "x": 0.288459, "text": "G" },
+            { "x": 0.381603, "text": "G" },
+            { "x": 0.438457, "text": "G" },
+            { "x": 0.494908, "text": "G" },
+            { "x": 0.564665, "text": "C" },
+            { "x": 0.621116, "text": "G" },
+            { "x": 0.701357, "text": "C" },
+            { "x": 0.788453, "text": "D" },
+            { "x": 0.845307, "text": "G" }
+          ],
+          "unread": 0
+        },
+        {
+          "staff": 2,
+          "marks": [
+            {
+              "x": 0.127343,
+              "bellows": "pull",
+              "button": 9,
+              "row": 1,
+              "held": false
+            },
+            {
+              "x": 0.189939,
+              "bellows": "push",
+              "button": 7,
+              "row": 2,
+              "held": false
+            },
+            {
+              "x": 0.252341,
+              "bellows": "pull",
+              "button": 9,
+              "row": 1,
+              "held": false
+            },
+            {
+              "x": 0.328349,
+              "bellows": "pull",
+              "button": 8,
+              "row": 1,
+              "held": false
+            },
+            {
+              "x": 0.372598,
+              "bellows": "push",
+              "button": 7,
+              "row": 1,
+              "held": false
+            },
+            {
+              "x": 0.416855,
+              "bellows": "pull",
+              "button": 7,
+              "row": 1,
+              "held": false
+            },
+            {
+              "x": 0.460903,
+              "bellows": "push",
+              "button": 6,
+              "row": 1,
+              "held": false
+            },
+            {
+              "x": 0.505161,
+              "bellows": "pull",
+              "button": 6,
+              "row": 1,
+              "held": false
+            },
+            {
+              "x": 0.549515,
+              "bellows": "pull",
+              "button": 7,
+              "row": 0,
+              "held": false
+            },
+            {
+              "x": 0.669368,
+              "bellows": "push",
+              "button": 7,
+              "row": 0,
+              "held": false
+            },
+            {
+              "x": 0.732069,
+              "bellows": "push",
+              "button": 8,
+              "row": 0,
+              "held": false
+            },
+            {
+              "x": 0.808076,
+              "bellows": "push",
+              "button": 6,
+              "row": 1,
+              "held": true
+            }
+          ],
+          "leftHand": [
+            { "x": 0.127433, "text": "A" },
+            { "x": 0.189932, "text": "E" },
+            { "x": 0.252431, "text": "A" },
+            { "x": 0.328035, "text": "F" },
+            { "x": 0.416542, "text": "C" },
+            { "x": 0.504847, "text": "G" },
+            { "x": 0.606459, "text": "G" },
+            { "x": 0.668958, "text": "G" },
+            { "x": 0.73186, "text": "G" },
+            { "x": 0.807666, "text": "C" }
+          ],
+          "unread": 0
+        }
+      ]
+    }
+  ],
+  "keyboard": "melodeonGC3"
+}

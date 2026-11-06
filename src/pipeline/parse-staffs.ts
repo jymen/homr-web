@@ -22,9 +22,10 @@ import {
   type EncodedSymbol,
   NEWLINE,
 } from "../transformer/symbol.js";
+import { withNoteColumns } from "./note-columns.js";
 import {
   ensureSameNumberOfStaffs,
-  prepareStaffImage,
+  prepareStaffImageAndPageX,
   staffRegions,
 } from "./staff-image.js";
 
@@ -87,7 +88,11 @@ export interface ParseStaffsOptions extends DecodeOptions {
   ) => void;
 }
 
-/** parse_staffs: one symbol list per voice, staffs parsed one at a time in homr's order. */
+/**
+ * parse_staffs: one symbol list per voice, staffs parsed one at a time in
+ * homr's order. Each note also carries the port's `column`, the page x of
+ * the notehead it was aligned with, normalised by `page.width`.
+ */
 export async function parseStaffs(
   cv: OpenCv,
   sessions: TransformerSessions,
@@ -109,10 +114,16 @@ export async function parseStaffs(
     for (const system of systems) {
       const staff = system.staffs[voice];
       if (staff !== undefined) {
-        const canvas = prepareStaffImage(cv, staff, page, regions);
+        const { canvas, toPageX } = prepareStaffImageAndPageX(
+          cv,
+          staff,
+          page,
+          regions
+        );
         options.onStaff?.("dewarp", done + 1, total);
         // biome-ignore lint/performance/noAwaitInLoops: one staff at a time, as homr does; the sessions share one WebAssembly arena
-        staffs.push(await parseStaffCanvas(sessions, canvas, options));
+        const symbols = await parseStaffCanvas(sessions, canvas, options);
+        staffs.push(withNoteColumns(symbols, staff, toPageX, page.width));
         done += 1;
         options.onStaff?.("staff", done, total);
       }
