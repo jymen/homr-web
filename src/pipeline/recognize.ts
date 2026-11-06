@@ -50,8 +50,8 @@ import { glyphsOf, linesIn, type PageTextItem } from "../tab/layer.js";
 import { readTablature, type TabReading } from "../tab/read.js";
 import { readTabText, type TabText } from "../tab/text.js";
 import { detectStaffsInImage } from "./detect.js";
-import { parseStaffs } from "./parse-staffs.js";
 import { pageCrop, staffInPage, WHOLE_PAGE } from "./page-crop.js";
+import { parseStaffs } from "./parse-staffs.js";
 import { staffBoxes, staffPositions } from "./staff-positions.js";
 
 /** What a page is read with. `open` is lazy, so a page that is not music never opens the transformer. */

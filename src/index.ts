@@ -12,6 +12,7 @@ export type {
   TextOptions,
 } from "./client.js";
 export { createRecognizer } from "./client.js";
+export { columnInPage, staffInPage } from "./pipeline/page-crop.js";
 export type {
   Backend,
   ButtonTabLetter,
@@ -45,7 +46,6 @@ export type {
   TabUnreadFret,
   TuningSource,
 } from "./result.js";
-export { columnInPage, staffInPage } from "./pipeline/page-crop.js";
 export { BACKENDS, PROGRESS_STAGES, RECOGNIZE_ERRORS } from "./result.js";
 export type { PageTextItem } from "./tab/layer.js";
 export type { PitchedEvent, PitchedNote, Tuning } from "./tab/pitch.js";
