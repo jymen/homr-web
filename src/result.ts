@@ -9,11 +9,8 @@
 import type { ButtonTabReading } from "./tab/button-read.js";
 import type { TabReading } from "./tab/read.js";
 
-export type {
-  ButtonTabLetter,
-  ButtonTabMark,
-  ButtonTabReading,
-} from "./tab/button-read.js";
+export type { ButtonTabLetter } from "./tab/button-letters.js";
+export type { ButtonTabMark, ButtonTabReading } from "./tab/button-read.js";
 
 export type { TabSystem } from "./tab/detect.js";
 export type {

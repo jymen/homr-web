@@ -7,7 +7,8 @@
  * - On the typeset CADB fixtures (test/fixtures/button-tab/), the reading
  *   equals truth.json mark for mark, x within 3 px, on the straight page
  *   and on the one turned 0.3 degrees, and every two-digit number is the
- *   recogniser's, not the single-digit classifier's.
+ *   recogniser's, not the single-digit classifier's. The left-hand
+ *   letters equal truth.json's too, x within 3 px.
  *
  * BUTTON_TAB_READ_PAGES, a ":"-separated list of `page.png#truth.json`
  * entries, adds pages that may not be committed (the findings' book photo
@@ -15,6 +16,8 @@
  * "P" or "T", button, row, held), with no x. Each system's reading is
  * aligned with its truth in order, and the output gives counts and miss
  * classes only, never the marks themselves: every truth mark must be read.
+ * The left-hand line is checked the same way against each system's bars'
+ * `leftHand` letters.
  */
 
 import { readFileSync } from "node:fs";
@@ -25,6 +28,7 @@ import { type ColorImage, colorImageFromRgba } from "../src/image/plane.js";
 import { ctcCharacters } from "../src/ocr/ctc.js";
 import { recognizeCrops } from "../src/ocr/rapid-ocr.js";
 import { detectButtonTabs, localInkOf } from "../src/tab/button.js";
+import { readLeftHand } from "../src/tab/button-letters.js";
 import {
   type ButtonTabNumber,
   type ButtonTabReading,
@@ -120,7 +124,13 @@ describeWithModels("the button tab reader on the CADB fixtures", () => {
             const reading = got[k] as ButtonTabReading;
             expect(reading.staff).toBe(want.staff);
             expect(reading.unread).toBe(0);
-            expect(reading.leftHand).toEqual([]);
+            expect(reading.leftHand.map(({ text }) => text)).toEqual(
+              want.leftHand.map(({ text }) => text)
+            );
+            for (const [j, letter] of reading.leftHand.entries()) {
+              const dx = (letter.x - (want.leftHand[j]?.x ?? 0)) * sheet.width;
+              expect(Math.abs(dx), `staff ${k} letter ${j}`).toBeLessThan(3);
+            }
             const strip = ({ marks }: ButtonTabReading) =>
               marks.map(({ x: _x, ...rest }) => rest);
             expect(strip(reading)).toEqual(strip(want));
@@ -138,10 +148,11 @@ describeWithModels("the button tab reader on the CADB fixtures", () => {
   }
 });
 
-/** A local page's truth: per system, its bars' marks left to right. */
+/** A local page's truth: per system, its bars' marks and left-hand letters left to right. */
 interface LocalTruth {
   readonly systems: readonly {
     readonly bars: readonly {
+      readonly leftHand: readonly string[];
       readonly marks: readonly {
         readonly band: "P" | "T";
         readonly button: number;
@@ -267,6 +278,67 @@ const LOCAL = (process.env.BUTTON_TAB_READ_PAGES ?? "")
     return { page: entry.slice(0, hash), truth: entry.slice(hash + 1) };
   });
 
+const LETTER_CLASSES = ["ok", "letter", "case", "missed", "extra"] as const;
+type LetterClass = (typeof LETTER_CLASSES)[number];
+
+const letterClass = (want: string, got: string): LetterClass => {
+  if (want === got) {
+    return "ok";
+  }
+  return want.toLowerCase() === got.toLowerCase() ? "case" : "letter";
+};
+
+/** Truth letters and letters read aligned in order (gap 1, a wrong letter 0.5), each pair classed. */
+function alignedLetters(
+  want: readonly string[],
+  got: readonly string[]
+): Record<LetterClass, number> {
+  const cost = (a: string, b: string) => (a === b ? 0 : 0.5);
+  const table = Array.from({ length: want.length + 1 }, () =>
+    new Array<number>(got.length + 1).fill(0)
+  );
+  const at = (i: number, j: number) => table[i]?.[j] ?? 0;
+  for (let i = 0; i <= want.length; i += 1) {
+    for (let j = 0; j <= got.length; j += 1) {
+      const row = table[i] as number[];
+      row[j] =
+        i === 0 || j === 0
+          ? i + j
+          : Math.min(
+              at(i - 1, j) + 1,
+              at(i, j - 1) + 1,
+              at(i - 1, j - 1) +
+                cost(want[i - 1] as string, got[j - 1] as string)
+            );
+    }
+  }
+  const counts = Object.fromEntries(
+    LETTER_CLASSES.map((kind) => [kind, 0])
+  ) as Record<LetterClass, number>;
+  let r = want.length;
+  let c = got.length;
+  while (r > 0 || c > 0) {
+    const a = want[r - 1];
+    const b = got[c - 1];
+    if (
+      a !== undefined &&
+      b !== undefined &&
+      at(r, c) === at(r - 1, c - 1) + cost(a, b)
+    ) {
+      counts[letterClass(a, b)] += 1;
+      r -= 1;
+      c -= 1;
+    } else if (a !== undefined && at(r, c) === at(r - 1, c) + 1) {
+      counts.missed += 1;
+      r -= 1;
+    } else {
+      counts.extra += 1;
+      c -= 1;
+    }
+  }
+  return counts;
+}
+
 // Declared only with pages to read: vitest fails a suite with no test in it.
 const describeLocal = LOCAL.length === 0 ? describe.skip : describeWithModels;
 
@@ -321,6 +393,56 @@ describeLocal("the button tab reader on local pages", () => {
             `local page ${k + 1}, bands ${Math.round(found - started)} ms, numbers ${Math.round(done - found)} ms, ${recognised} of ${total} marks read by the recogniser\n${rows.join("\n")}\n`
           );
           expect(missed).toBe(0);
+        } finally {
+          await close();
+        }
+      },
+      PAGE_TIMEOUT_MS
+    );
+    it(
+      `local page ${k + 1}: every left-hand letter read, system by system`,
+      async () => {
+        const { close, cv, read } = await readers();
+        try {
+          const want: LocalTruth = JSON.parse(
+            readFileSync(paths.truth, "utf8")
+          );
+          const page = pngPage(paths.page);
+          const tabs = await detectButtonTabs(cv, page, read);
+          expect(tabs).toHaveLength(want.systems.length);
+          const ink = localInkOf(cv, page);
+          const started = performance.now();
+          const rows: string[] = [];
+          let wrong = 0;
+          for (const [s, tab] of tabs.entries()) {
+            // biome-ignore lint/performance/noAwaitInLoops: one recogniser session, a tab at a time
+            const { letters, readAs } = await readLeftHand(
+              cv,
+              page,
+              ink,
+              tab,
+              read
+            );
+            const truthLetters = (want.systems[s]?.bars ?? []).flatMap(
+              (bar) => bar.leftHand
+            );
+            const counts = alignedLetters(
+              truthLetters,
+              letters.map(({ text }) => text)
+            );
+            wrong += truthLetters.length - counts.ok;
+            rows.push(
+              `system ${s + 1}: ${counts.ok}/${truthLetters.length} letters read (${readAs}); ${LETTER_CLASSES.slice(
+                1
+              )
+                .map((c) => `${c} ${counts[c]}`)
+                .join(", ")}`
+            );
+          }
+          process.stdout.write(
+            `local page ${k + 1}, letters ${Math.round(performance.now() - started)} ms\n${rows.join("\n")}\n`
+          );
+          expect(wrong).toBe(0);
         } finally {
           await close();
         }

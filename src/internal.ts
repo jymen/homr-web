@@ -73,6 +73,7 @@ export * from "./segmentation/resize.js";
 export * from "./segmentation/segment.js";
 export * from "./segmentation/tiles.js";
 export * from "./tab/button.js";
+export * from "./tab/button-letters.js";
 export * from "./tab/button-read.js";
 export * from "./tab/detect.js";
 export * from "./tab/layer.js";

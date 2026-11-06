@@ -18,6 +18,7 @@
 import type { OpenCv } from "../cv/opencv.js";
 import { type ColorImage, createColor } from "../image/plane.js";
 import { type DetectedButtonTab, lineYAt, localInkOf } from "./button.js";
+import { type ButtonTabLetter, readLeftHand } from "./button-letters.js";
 import {
   type Band,
   type Box,
@@ -49,15 +50,9 @@ export interface ButtonTabMark {
   readonly x: number;
 }
 
-/** The left-hand line's letters (H3). */
-export interface ButtonTabLetter {
-  readonly text: string;
-  readonly x: number;
-}
-
 /** One button tab read: the marks of both bands left to right. */
 export interface ButtonTabReading {
-  /** Empty until the letter line is read (H3). */
+  /** The left-hand line under the T band, left to right, as printed. */
   readonly leftHand: readonly ButtonTabLetter[];
   readonly marks: readonly ButtonTabMark[];
   /** The staff the tab hangs under, among homr's staves; the tab's order on the page when homr placed no staff above it. */
@@ -577,7 +572,8 @@ export async function readButtonTabNumbers(
 /**
  * Every tab's numbers, in the tabs' order. `read` is the recogniser the
  * guard used; `classify`, the tab digit classifier, second-reads each
- * number as it does a fret (fuseDigit). The left-hand line is H3's.
+ * number as it does a fret (fuseDigit); the left-hand line is read
+ * under each tab (readLeftHand).
  */
 export async function readButtonTabs(
   cv: OpenCv,
@@ -601,8 +597,9 @@ export async function readButtonTabs(
       read,
       classify
     );
+    const { letters } = await readLeftHand(cv, page, ink, tab, read);
     readings.push({
-      leftHand: [],
+      leftHand: letters,
       marks: numbers.flatMap(({ mark }) => (mark === undefined ? [] : [mark])),
       staff: tab.band.staff ?? k,
       unread: numbers.filter(({ mark }) => mark === undefined).length,

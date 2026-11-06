@@ -384,3 +384,62 @@ Open points:
   are normalised by the page given, `noteColumns` and `staves` by the
   autocropped page. Before A1, either homr-web gives the button marks in the
   autocropped frame too, or the result carries the autocrop rectangle.
+
+# H3: left hand (2026-11-06)
+
+`src/tab/button-letters.ts` reads the letter line under each tab's T band
+into `ButtonTabReading.leftHand`: each word as printed (`text`) with the
+page-normalised x of its ink centre, the frame of the button marks. It reads
+the page as given, where the line still is; the guard paints it out only of
+the copy homr reads. What the letters mean is the app's (owner, answer 2:
+the left hand follows the staff's chord symbols, and the letter line never
+writes chord symbols). Decisions are `btab-5`.
+
+How a line is read:
+
+1. A strip under the T band, straightened along the rule like the bands,
+   from 0.85 of the T band's height to the letter line's reach found by H1.
+2. Its letter-sized pieces (0.35 to 1.4 margin-T heights tall), less the
+   stubs of bars running out of the band, grouped into words: pieces closer
+   than a quarter of a letter height are one word ("Am", a broken letter).
+3. The words packed side by side on one short image and read by the
+   recogniser in one run. It reads no spaces there, so the text is taken one
+   character per piece and rejoined per word; when the count disagrees,
+   each word is read on its own. NFKC undoes the recogniser's full-width
+   capitals; nothing else is changed, case included.
+
+Measured (`test/button-tab-read.test.ts`; the photo's letters against its
+truth's per-bar `leftHand`, counts only):
+
+| | straight | turned 0.3° | book photo |
+|---|---|---|---|
+| letters read / truth | 30 / 30 | 30 / 30 | 64 / 64 |
+| x against truth.json | within 1 px | within 1 px | no x in its truth |
+| read as one packed line | 3 / 3 tabs | 3 / 3 | 4 / 4 |
+| time | 0.22 s | 0.22 s | 0.42 s |
+
+Photo, per system: 16/16, 16/16, 16/16 and 16/16, with no wrong letter, case
+change, missed or extra letter. Reading each word on its own reads the same
+letters but takes 2.6 s per fixture page (33 crops) and 4.9 s on the photo
+(68 crops).
+
+The twelfth reading's bug: before H1, the 16 letters under system 3 were
+read as 16 chord texts above system 4. Through `recognizePage` now, no text
+stands above system 4 (texts per staff 2, 0, 2, 0), and the letters are
+`leftHand` of the third tab. Neither run puts a `<harmony>` in the MusicXML.
+
+Other samples, through `recognizePage` against the H2 results: Mattawa,
+Gavotte Koun, Flatworld and Weeping Willow are identical in every field; on
+the photo and the fixtures every field but `buttonTabs[].leftHand` is
+identical. Whole page, CPU: photo 55.1 s (53.8 s in H2), fixtures 51.4 and
+47.5 s (46.5 and 46.3 s); the letter reading itself is 0.2 to 0.4 s, the
+rest is run-to-run noise.
+
+Not covered:
+
+- No lower-case letter, `m` or other multi-letter word on either page: the
+  word rule and the one-character-per-piece count are untested on them. A
+  typeset fixture with "Am", "Dm", "g" would close that (typeset-tab.mjs).
+- A letter line the guard did not find (H1's letterLine reach) is read only
+  as deep as the T band's own height allows.
+- A word's x is its box centre; for "Am" that is right of the capital.
