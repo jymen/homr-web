@@ -216,11 +216,23 @@ function sliceRect(image: ColorImage, rect: PaperRect): ColorImage {
  * can compare identity to tell, and a 26 MB page is not copied for nothing.
  */
 export function autocrop(image: ColorImage, cv: OpenCv): ColorImage {
+  return autocropWithRect(image, cv).page;
+}
+
+/**
+ * `autocrop`, also saying which rect it cut: null when it kept the page.
+ * Everything homr measures afterwards is normalised by the cut page, so a
+ * caller placing those measures on the page it gave needs the rect.
+ */
+export function autocropWithRect(
+  image: ColorImage,
+  cv: OpenCv
+): { readonly page: ColorImage; readonly rect: PaperRect | null } {
   const rect = findPaperRect(image, cv);
   if (rect === null || rect.isFullPageView) {
-    return image;
+    return { page: image, rect: null };
   }
-  return sliceRect(image, rect);
+  return { page: sliceRect(image, rect), rect };
 }
 
 /**
@@ -250,6 +262,8 @@ export function applyClahe(image: ColorImage, cv: OpenCv): GrayImage {
 }
 
 export interface PreprocessedPage {
+  /** The rect autocrop cut out of the page given, null when it kept it. */
+  readonly paper: PaperRect | null;
   /** The gray page segnet is fed: `preprocessed.png`. */
   readonly preprocessed: GrayImage;
   /**
@@ -286,6 +300,11 @@ export async function preprocessPage(
   cv?: OpenCv
 ): Promise<PreprocessedPage> {
   const handle = cv ?? (await loadOpenCv());
-  const resized = resizeToTargetWidth(autocrop(page, handle));
-  return { preprocessed: applyClahe(resized, handle), resized };
+  const cut = autocropWithRect(page, handle);
+  const resized = resizeToTargetWidth(cut.page);
+  return {
+    paper: cut.rect,
+    preprocessed: applyClahe(resized, handle),
+    resized,
+  };
 }

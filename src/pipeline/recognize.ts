@@ -51,6 +51,7 @@ import { readTablature, type TabReading } from "../tab/read.js";
 import { readTabText, type TabText } from "../tab/text.js";
 import { detectStaffsInImage } from "./detect.js";
 import { parseStaffs } from "./parse-staffs.js";
+import { pageCrop, staffInPage, WHOLE_PAGE } from "./page-crop.js";
 import { staffBoxes, staffPositions } from "./staff-positions.js";
 
 /** What a page is read with. `open` is lazy, so a page that is not music never opens the transformer. */
@@ -239,7 +240,7 @@ async function readPage(
     onProgress?.({ done, stage, total });
 
   signal?.throwIfAborted();
-  const { preprocessed, resized } = await preprocessPage(page, cv);
+  const { paper, preprocessed, resized } = await preprocessPage(page, cv);
   const segnet = await engine.open("segnet", DEFAULT_SEGNET_BATCH, signal);
   signal?.throwIfAborted();
   const { masks } = await segmentPage(segnet, preprocessed, {
@@ -257,6 +258,7 @@ async function readPage(
   const staves = staffBoxes(
     staffPositions(detection.multiStaffs, detection.preprocessed)
   );
+  const crop = pageCrop(paper, page);
 
   const encoder = await engine.open("encoder", undefined, signal);
   const decoder = await engine.open("decoder", undefined, signal);
@@ -275,7 +277,9 @@ async function readPage(
           engine,
           {
             page,
-            staves,
+            // The strips are cut from the page given, the staves measured
+            // on the autocropped one.
+            staves: staves.map((staff) => staffInPage(staff, crop)),
             title: { resized, topStaff: detection.topStaff },
           },
           log,
@@ -291,6 +295,7 @@ async function readPage(
   report("xml", 1, 1);
   log.push(`Finished parsing ${voices.length} staves`);
   return {
+    crop,
     engine: "browser",
     error: "",
     musicXml,
@@ -426,7 +431,13 @@ export async function recognizePage(
       log,
       options
     );
-    const placed = withStaves(buttonTabs, reading.staves);
+    // The bands are on the page given, the staves on the autocropped one.
+    const placed = withStaves(
+      buttonTabs,
+      reading.staves.map((staff) =>
+        staffInPage(staff, reading.crop ?? WHOLE_PAGE)
+      )
+    );
     // Read off the page as given, as the guard found the bands on it.
     const buttonReadings = await readButtonTabs(
       engine.cv,
@@ -494,6 +505,7 @@ export async function recognizeTexts(
     return {
       backend: engine.backend,
       buttonTabs: [],
+      crop: WHOLE_PAGE,
       durationMs: Math.round(performance.now() - started),
       engine: "browser",
       error: "",

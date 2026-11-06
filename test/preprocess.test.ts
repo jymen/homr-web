@@ -18,6 +18,7 @@ import {
 import {
   applyClahe,
   autocrop,
+  autocropWithRect,
   findPaperRect,
   type PaperRect,
   preprocessPage,
@@ -183,6 +184,19 @@ describe("autocrop", () => {
     const cropped = autocrop(page, cv);
     expect(sizeOf(cropped)).toEqual([282, 282]);
     expect(differingBytes(cropped.data, numpySlice(page, rect))).toBe(0);
+  });
+
+  it("says which rect it cut, and null when it kept the page", async () => {
+    const cv = await testOpenCv();
+    const photo = syntheticPhotograph(105, 395);
+    const cut = autocropWithRect(photo, cv);
+    expect(cut.rect).toEqual(findPaperRect(photo, cv));
+    expect(sizeOf(cut.page)).toEqual([282, 282]);
+    const full = syntheticPhotograph(
+      Math.trunc(SYNTHETIC_QUARTER) - 20,
+      SYNTHETIC_SIZE
+    );
+    expect(autocropWithRect(full, cv)).toEqual({ page: full, rect: null });
   });
 
   it("hands back the page it was given when the rect starts near an edge", async () => {

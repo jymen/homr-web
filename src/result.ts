@@ -60,6 +60,20 @@ export interface StaffBox {
   readonly w: number;
 }
 
+/**
+ * The part of the page given that homr's reading saw, normalised by that page:
+ * autocrop's paper rect, or the whole page `{0, 0, 1, 1}` when autocrop kept
+ * it. `staves` and `noteColumns` are normalised by this part, as homr's
+ * staff-positions file is; `tablature`, `buttonTabs` and `texts` by the page given.
+ * `staffInPage` and `columnInPage` carry the first into the second.
+ */
+export interface PageCrop {
+  readonly x0: number;
+  readonly x1: number;
+  readonly y0: number;
+  readonly y1: number;
+}
+
 /** The server's `OmrText`: a chord or title read in the strip above staff `staff`, box page-normalised, score rounded to 3 digits. */
 export interface PageText {
   readonly score: number;
@@ -144,6 +158,13 @@ export interface RecognizeSuccess extends ResultBase {
    * compiles.
    */
   readonly buttonTabs?: readonly ButtonTabReading[];
+  /**
+   * Where `staves` and `noteColumns` sit on the page given. Always set by
+   * this library (the whole page from `recognizeTexts`, whose staves are the
+   * caller's); optional so that a caller's hand-written result still
+   * compiles.
+   */
+  readonly crop?: PageCrop;
   readonly error: "";
   readonly musicXml: string;
   /**
