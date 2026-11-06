@@ -317,6 +317,26 @@ staff). It is what lets a caller put something printed under or over a note
 back on that note. Both fields are optional in the type so that a result
 built by hand still compiles; `recognizePage` always sets them.
 
+### Two frames: `crop`
+
+`staves` and `noteColumns` are normalised by the page homr read after its
+autocrop, as homr's own staff-positions file is; `tablature`, `buttonTabs`
+and the boxes in `texts` by the page as given. On a photograph whose paper
+autocrop cuts out, the two differ. `crop` is that paper as a fraction of the
+page given (`{ x0: 0, y0: 0, x1: 1, y1: 1 }` when autocrop keeps the whole
+page), and two helpers carry the first frame into the second:
+
+```ts
+import { columnInPage, staffInPage } from "homr-web";
+
+const crop = result.crop ?? { x0: 0, x1: 1, y0: 0, y1: 1 };
+const column = result.noteColumns?.[k];
+if (column != null) {
+  const x = columnInPage(column, crop); // comparable with a mark's x
+}
+const staff = staffInPage(result.staves[i], crop); // on the page given
+```
+
 ### Melodeon button tab
 
 Some melodeon books print a button tab (CADB) under each staff: a push band

@@ -457,3 +457,17 @@ release commit and its tag `v0.6.0+homr0.7.0` are pushed.
 Still open for the app's A1: button marks and letters are normalised by the
 page as given, `noteColumns` and `staves` by the autocropped page; the two
 frames agreed on every page measured here, but not by construction.
+
+# Release 0.6.1: one frame for the tabs (2026-11-06)
+
+The open point above is closed. `RecognizeSuccess.crop` gives autocrop's
+paper rect as a fraction of the page given, and `staffInPage` and
+`columnInPage` (exported) carry `staves` and `noteColumns` into it. Two
+places inside the library compared the frames without that and now go
+through it: `withStaves`, which ties a button tab to the staff above it,
+and the chord strips, cut from the page given at the staves' positions. On
+every page measured the crop was the whole page, so no reading changed (full
+suite 1183 passed); on a photograph autocrop does cut, a band low on the
+page could miss its staff and a chord strip be cut from the wrong place.
+`staves` and `noteColumns` themselves are unchanged and still equal homr's.
+A patch bump: one optional field and two helpers, no caller has to change.
