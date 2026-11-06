@@ -443,3 +443,17 @@ Not covered:
 - A letter line the guard did not find (H1's letterLine reach) is read only
   as deep as the T band's own height allows.
 - A word's x is its box centre; for "Am" that is right of the capital.
+
+# H4: release 0.6.0 (2026-11-06)
+
+`RecognizeSuccess` carries `noteColumns` (H4 of the plan, built first) and
+`buttonTabs` (H1 to H3), both optional in the type and always set by
+`recognizePage`; `ButtonTabReading`, `ButtonTabMark` and `ButtonTabLetter`
+are exported from the package root. The README documents both fields. The
+version is 0.6.0, a minor bump: the result gains fields and no caller has
+to change. Published through `tools/npm-publish.sh` by the owner, once the
+release commit and its tag `v0.6.0+homr0.7.0` are pushed.
+
+Still open for the app's A1: button marks and letters are normalised by the
+page as given, `noteColumns` and `staves` by the autocropped page; the two
+frames agreed on every page measured here, but not by construction.

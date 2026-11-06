@@ -36,6 +36,8 @@ if (result.ok) {
   console.log(result.staves); // [{ index, cx, cy, w, h }], page-normalised, top to bottom
   console.log(result.texts); // [{ staff, text, score, x0, y0, x1, y1 }], the chords above each staff
   console.log(result.tablature); // [{ index, lines, cx, cy, w, h, events, barlines, slurs, ... }], tab systems, their frets and rhythm
+  console.log(result.noteColumns); // [x | null], one per <note> of musicXml: the x of its notehead
+  console.log(result.buttonTabs); // [{ staff, marks, leftHand, unread }], melodeon button tab under each staff
 } else {
   console.warn(result.error, result.log);
 }
@@ -61,7 +63,8 @@ with `ok: false` and one of these codes in `error`:
 
 The result has the shape of the AbcMusicStudio server's homr route (`engine`,
 `ok`, `error`, `musicXml`, `log`, `durationMs`, `staves`, `texts`) plus
-`backend` and `tablature`, which the server does not have yet. `texts` holds what RapidOCR reads in the strip from 1.9 to 0.05
+`backend`, `tablature`, `noteColumns` and `buttonTabs`, which the server
+does not have yet. `texts` holds what RapidOCR reads in the strip from 1.9 to 0.05
 staff heights above each staff, 3 % of the page wider on the left and 2 % on
 the right: one entry per line of text, its box normalised to the page and
 rounded to 4 digits, its score to 3, sorted by staff and then from left to
@@ -303,6 +306,44 @@ fifth string is the last one, and the capo raises it like the others.
 `pitchTab` throws a `RangeError` when the tuning's string count is not the
 system's line count, or when no tuning is passed and none that fits was read.
 `tuningOf(tab)` gives the read tuning in `pitchTab`'s terms, or undefined.
+
+### Note columns
+
+`noteColumns` has one entry per `<note>` element of `musicXml`, in document
+order, chord tones and rests included: the x of the notehead printed for
+that note, normalised like `staves` (by the page after homr's autocrop), or
+`null` where no notehead was tied to it (a rest, a missed head, a grand
+staff). It is what lets a caller put something printed under or over a note
+back on that note. Both fields are optional in the type so that a result
+built by hand still compiles; `recognizePage` always sets them.
+
+### Melodeon button tab
+
+Some melodeon books print a button tab (CADB) under each staff: a push band
+(P) over a pull band (T), split by one rule, a button number under each note
+head, and a line of left-hand letters under the pull band. homr would read
+the numbers as notes and the letters as the next staff's chords, so the
+recogniser paints the bands and the letter line out before homr reads the
+page, and reads them on their own:
+
+```ts
+for (const tab of result.buttonTabs ?? []) {
+  console.log(tab.staff); // the staff it hangs under, as in staves
+  console.log(tab.marks); // [{ x, bellows: "push" | "pull", button, row, held }]
+  console.log(tab.leftHand); // [{ x, text }], as printed: "C", "Am", "g"
+  console.log(tab.unread); // number-sized marks that read as no button
+}
+```
+
+`button` is the number as printed, from 1 to 12; `row` is 0 with no mark,
+1 for `'` and 2 for `''`; `held` is a trailing `-`. A mark's x is the centre
+of its digits, the suffix left out, and a letter's the centre of its word;
+both are normalised by the page as given, as `tablature`'s are. The
+library reads the marks only: which keyboard they are for, and what a
+button sounds, is the caller's, and so is checking each mark against the
+staff note above it, which catches a misread digit or a lost apostrophe. A
+page is taken for button tab only when the recogniser reads the P and the T
+at the rule's left end, and `buttonTabs` is empty on any other page.
 
 To read the strips alone above staves you already have, for example the
 server's:
