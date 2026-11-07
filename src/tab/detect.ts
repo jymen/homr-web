@@ -202,6 +202,12 @@ const TAB = {
   minRunShare: 1 / 45,
   /** A mark sits on a line when its centre is this close to it. */
   onLine: 0.3,
+  /**
+   * A pen over printed rules (penLevelOf): the lines' darkest row is at least
+   * this gray, and a pixel on them darker than `penShare` of that is the pen's.
+   */
+  penLineGray: 64,
+  penShare: 0.5,
   /** Marks read per recogniser run (RapidOCR's own batch), and at most this many per group. */
   readBatch: 6,
   /**
@@ -902,7 +908,9 @@ function eraseStubs(
  * line left beside a knock-out). The bar of an H standing on the line inside
  * a knock-out is short and held by a stem at both ends, so it stays. With
  * `jogs`, a stroke turning along the line keeps the line under its turn
- * (bridgeJogs): reading a system whose frets stand over its lines.
+ * (bridgeJogs): reading a system whose frets stand over its lines. With
+ * `pen`, a pixel on the line darker than the line is a pen's stroke lying
+ * along it and stays (penLevelOf).
  */
 export function bandWithoutLines(
   ink: Uint8Array,
@@ -913,7 +921,8 @@ export function bandWithoutLines(
     above: TAB.markBand,
     below: TAB.markBand,
   },
-  jogs = false
+  jogs = false,
+  pen?: PenInk
 ): Band {
   const { bottom, top } = bandOf(group, height, reach.above, reach.below);
   const cols = group.x1 - group.x0 + 1;
@@ -938,15 +947,63 @@ export function bandWithoutLines(
       free,
       minRun: group.spacing,
     });
+    const penAt = (x: number, y: number) =>
+      pen !== undefined &&
+      (pen.gray[(y + top) * width + group.x0 + x] ?? 255) < pen.below;
     for (let x = 0; x < cols; x += 1) {
       if (ruled[x] === 1 && free[x] === 1) {
         for (let y = Math.max(0, a); y <= Math.min(rows - 1, b); y += 1) {
-          data[y * cols + x] = 0;
+          data[y * cols + x] = penAt(x, y) ? (data[y * cols + x] ?? 0) : 0;
         }
       }
     }
   }
   return { data, rows, top };
+}
+
+/** The page's gray, and the level under which a pixel on a group's lines is a pen's (penLevelOf). */
+export interface PenInk {
+  readonly below: number;
+  readonly gray: Uint8Array;
+}
+
+/** The page's gray, as inkOf thresholds it. */
+export function grayOf(cv: OpenCv, page: ColorImage): Uint8Array {
+  return withMatScope((scope) => {
+    const gray = scope.keep(new cv.Mat());
+    cv.cvtColor(planeToMat(cv, scope, page), gray, cv.COLOR_BGR2GRAY);
+    return new Uint8Array(gray.data);
+  });
+}
+
+/**
+ * Where a pen wrote over printed rules, the level under which a pixel on the
+ * group's lines is the pen's: `penShare` of the lines' gray (the median over
+ * their columns of the darkest pixel across a line). Undefined when the
+ * lines are as dark as `penLineGray` or darker: a printed page, its rules as
+ * black as its digits. Weeping Willow's rules are 120 to 130 at their
+ * darkest, its pen 0 to 30: a 4 drawn with its crossbar along a line, or a
+ * 2 with its foot on one, keeps the stroke the line erasure took, and fell
+ * in two ("11", a lone "1") or lost its foot.
+ */
+export function penLevelOf(
+  gray: Uint8Array,
+  width: number,
+  group: LineGroup
+): number | undefined {
+  const darkest: number[] = [];
+  for (const line of group.lines) {
+    for (let x = group.x0; x <= group.x1; x += 1) {
+      let min = 255;
+      for (let y = line.y0; y <= line.y1; y += 1) {
+        min = Math.min(min, gray[y * width + x] ?? 255);
+      }
+      darkest.push(min);
+    }
+  }
+  darkest.sort((a, b) => a - b);
+  const level = darkest[Math.floor(darkest.length / 2)] ?? 0;
+  return level < TAB.penLineGray ? undefined : TAB.penShare * level;
 }
 
 /**
@@ -1266,12 +1323,15 @@ const PRINTED_MARK: MarkSize = {
 /**
  * Reading a system already known to be a tab: a hand writes its digits
  * larger than a line space (Weeping Willow's zeros are 1.05 to 1.3 wide and
- * up to 1.25 tall), which deciding whether a group is a tab must not take,
- * as a staff's noteheads are that size too. A mark taller than a printed
+ * up to 1.25 tall; a 5 with its sweeping tail 1.47 wide and 1.36 tall, a 2
+ * 1.30 tall), which deciding whether a group is a tab must not take, as a
+ * staff's noteheads are that size too. Killdare Fancy prints its digits 1.41
+ * spacings tall on its close lines and read almost none of them under the
+ * earlier 1.3 by 1.35 bound. A mark taller than a printed
  * fret must still be wider than a stroke: a piece of stem crossing a line is
  * that tall too (Arkansas Traveler's TablEdit stems read as 1s).
  */
-export const READ_MARK: MarkSize = { maxHeight: 1.3, maxWidth: 1.35 };
+export const READ_MARK: MarkSize = { maxHeight: 1.45, maxWidth: 1.55 };
 
 /**
  * A system found by the hand-written second chance: a hand's frets reach two
@@ -1372,13 +1432,41 @@ export function marksOf(
   height: number,
   group: LineGroup,
   size: MarkSize = PRINTED_MARK,
-  jogs = false
+  jogs = false,
+  pen?: PenInk
 ): { readonly marks: Mark[]; readonly short: Mark[] } {
-  const band = bandWithoutLines(ink, width, height, group, undefined, jogs);
+  const band = bandWithoutLines(
+    ink,
+    width,
+    height,
+    group,
+    undefined,
+    jogs,
+    pen
+  );
   if (size === HAND_MARK) {
     eraseStems(band, group.x1 - group.x0 + 1, group.spacing);
   }
-  return marksInBand(cv, band, group, size);
+  const { marks, short } = marksInBand(cv, band, group, size);
+  // A stroke the band's edge cuts, its ink running on past it, is a stem
+  // crossing the outer line, not a 1 on it: a pen's stem starting a third
+  // of a spacing above Weeping Willow's bottom line read 5/1. A fret on the
+  // outer line never reaches the edge, markBand away from it.
+  const inkPast = (mark: Mark, y: number) =>
+    y >= 0 &&
+    y < height &&
+    Array.from({ length: mark.w }, (_, k) => ink[y * width + mark.x + k]).some(
+      (v) => v === 1
+    );
+  const last = band.top + band.rows - 1;
+  const cut = (mark: Mark) =>
+    mark.w < TAB.strokeWidth * group.spacing &&
+    ((mark.y === band.top && inkPast(mark, band.top - 1)) ||
+      (mark.y + mark.h - 1 === last && inkPast(mark, last + 1)));
+  return {
+    marks: marks.filter((m) => !cut(m)),
+    short: short.filter((m) => !cut(m)),
+  };
 }
 
 /**
@@ -1515,9 +1603,18 @@ export function inkWithoutLines(
   width: number,
   height: number,
   group: LineGroup,
-  jogs = false
+  jogs = false,
+  pen?: PenInk
 ): Uint8Array {
-  const band = bandWithoutLines(ink, width, height, group, undefined, jogs);
+  const band = bandWithoutLines(
+    ink,
+    width,
+    height,
+    group,
+    undefined,
+    jogs,
+    pen
+  );
   const cols = group.x1 - group.x0 + 1;
   const out = ink.slice();
   for (let y = 0; y < band.rows; y += 1) {

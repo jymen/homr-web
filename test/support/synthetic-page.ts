@@ -28,6 +28,8 @@ export type Drawn =
       readonly spacing: number;
       /** Line thickness in pixels; 2 when absent. */
       readonly thickness?: number;
+      /** The lines' gray, 0 to 255, as printed rules under a pen; black when absent. */
+      readonly lineGray?: number;
       /** Rows each line drops from its left end to its right end, as a scan turned a little; 0 when absent. */
       readonly tilt?: number;
       /** Zeros as a hand writes them, hollow ovals about 1.2 line spacings wide, in place of the printed frets. */
@@ -52,7 +54,11 @@ function drawLines(
   top: number,
   count: number,
   spacing: number,
-  { thickness = 2, tilt = 0 }: { thickness?: number; tilt?: number } = {}
+  {
+    lineGray = 0,
+    thickness = 2,
+    tilt = 0,
+  }: { lineGray?: number; thickness?: number; tilt?: number } = {}
 ): void {
   for (let k = 0; k < count; k += 1) {
     const y = top + k * spacing;
@@ -60,7 +66,7 @@ function drawLines(
       page,
       new cv.Point(X0, y),
       new cv.Point(X1, y + tilt),
-      BLACK,
+      [lineGray, lineGray, lineGray, 255],
       thickness
     );
   }

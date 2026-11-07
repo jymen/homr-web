@@ -707,6 +707,101 @@ makes that bar sum (`tools/tab-rhythm-accuracy.ts` 221 to 222 of 242 bars,
 `--layer` could not be rerun: its source PDFs are no longer where
 `tab-rhythm-truth.json` points (tab-import-samples/Angelina baker ...).
 
+## Weeping Willow: the last lost frets (2026-11-07)
+
+Each of the ten notes the page still lost (and the one extra 5/1) traced to
+where it went wrong, with the marks' boxes, RapidOCR's text and the
+classifier's guess dumped per system (`.scratch/ww/t5-marks.ts`, local):
+
+| lost mark | where it went wrong | fixed by |
+|---|---|---|
+| two 4s on the third string, read "11" (line 2) and "1" (line 4) | line erasure: the 4's crossbar lies along the line and went with it, so the 4 fell in two, its diagonal and its upright; on line 2 the two pieces merged and read "11" (the classifier said 4 at 0.99, but a two-digit read is never replaced), on line 4 they stood 4 px apart, past `mergeGap`, a short piece and a "1" | 1. a pen over printed rules |
+| the 3/2 on line 3 | line erasure: the 2's diagonal crosses the line where its hook's tail stands over it, so neither side was one stroke leaving the line (bridgeJogs); the hook stayed alone, a short mark read "1" | 1. |
+| two 5s on the third string, line 2 | segmentation: 1.47 by 1.36 and 1.30 by 1.36 spacings with their tails, over `READ_MARK`'s 1.35 by 1.3; no mark at all | 2. `READ_MARK` 1.45 tall, 1.55 wide |
+| the 2 on the first string, line 2 | segmentation: 24 px, 1.30 spacings tall, a pixel over the bound | 2. |
+| the 2 on the first string, line 4 | the trust rule: RapidOCR reads "Z", the classifier 2 at 0.91, under `DIGIT_SURE` (0.95) | 4. a fret a stem proves |
+| the 1 drawn as a tick on the second string, line 1 | segmentation: 14 px tall against a median of 19, under `minMedianHeight`, so a short mark, never a fret (RapidOCR "1", the classifier 1 at 0.45) | 4. |
+| the 1 drawn as a tick on the second string, line 4 | the trust rule: RapidOCR "f", the classifier 1 at 0.81 | 4. |
+| the 5/1 of a stem crossing the bottom line (line 2) | segmentation: the band read for marks ends 0.75 spacing under the bottom line and cut a pen's stem starting 0.3 spacing above it into a stroke 1.08 spacings tall, a "1" (the classifier said not a digit, 0.82) | 3. a stroke the band's edge cuts |
+| the third 5 on the third string, line 3 | segmentation: the 5's flag is a separate piece, one pixel off its body in a pen's thin stroke; the body reads "S" (a slide letter), the classifier 5 at 0.59 | not fixed |
+
+The classifier was not the limit: where a mark reached it whole it read the
+hand (4 at 0.98 to 1.00, 2 at 0.91, 1 at 0.81); what failed was the line
+erasure, the size bounds, a band edge and the trust rule. No model was
+retrained, and nothing changes for the owner's hosts.
+
+1. **A pen over printed rules** (`penLevelOf`, the `pen` option of
+   `bandWithoutLines`, `marksOf` and `inkWithoutLines`). On the owner's
+   scan the rules are gray, 120 to 130 at their darkest across a line, and
+   the pen black, 0 to 30. When a group's lines are at least `penLineGray`
+   (64) at their darkest (the median over their columns), a pixel on a line
+   darker than `penShare` (half) of that is the pen's and the erasure keeps
+   it. A printed page's rules are as black as its digits, the level is
+   undefined and the erasure is as before. Weeping Willow's levels: 62.5 to
+   66.5. A first try generalised bridgeJogs instead (a stroke crossing the
+   line beside one leaving it), which joined a printed 5 on Killdare Fancy
+   to its neighbour and lost it; it was dropped.
+2. **`READ_MARK` 1.45 by 1.55 spacings** (was 1.3 by 1.35), reading a
+   system already found to be a tab; the guard's printed bound is unchanged,
+   and a mark taller than a printed fret must still be wider than a stroke.
+3. **A stroke the band's edge cuts is no mark** (`marksOf`): narrower than
+   `strokeWidth`, touching the band's first or last row, its ink running on
+   past it. A fret on the outer line stops short of the edge.
+4. **A fret a stem proves** (`stemFretOf`, read.ts). A stray stem (a beamed
+   stem under no fret, 2026-11-01) is a note. The mark over it that read as
+   no fret becomes its fret when the classifier names a digit at
+   `STEM_DIGIT_SURE` (0.8) or more, or, as a 1, when it is a tick: one
+   stroke per row, its median row no wider than 0.4 spacing, at least 0.6
+   spacing tall and no wider than 0.6 of its height (Weeping Willow's ticks
+   lean 0.36 and 0.47; a hand's 5, also one stroke per row, 0.72). A
+   technique letter stays a letter. The system's columns and rhythm are then
+   read again with those frets in. Away from a stray stem nothing changes:
+   `DIGIT_SURE` still holds for every other mark.
+
+| step | Weeping Willow notes | per line | printed notes changed (16 pages, 2185) |
+|---|---|---|---|
+| aa058be | 119/129 | 26, 28, 30, 28, 7 | - |
+| 1. pen over printed rules | 122/129 | 26, 29, 31, 29, 7 | 0 |
+| 2. and 3. size, band edge | 125/129 | 27, 32, 31, 29, 7 | 118 (below) |
+| 4. a fret a stem proves | 128/129 | 27, 32, 31, 31, 7 | as 2. and 3. |
+
+Unread frets left: one, line 3's "S" over its stem, with its time. Bars
+summing to 4/4: 15 of 18, as before (the three left hold notes drawn with
+no stem: the pickup, the last bar's first note, two notes of the first
+ending).
+
+**The printed pages change, each change a correction.** The bar for this
+work was no printed note changed; 118 change, and every one was checked
+against a truth:
+
+- *Killdare Fancy*, all four systems (99 notes): its digits are printed 1.41
+  spacings tall on close lines, over the old bound, so its systems read 5,
+  7, 9 and 5 notes, many of them pieces ("2/1"). Now 31, 26, 29 and 26, and
+  every right note read before is still read. System 1 against
+  `tab-truth.json`: all 31 read are in the truth's order (37 notes; 3
+  before). Systems 2 and 4 checked by eye: every note read is right; what
+  they lose are 5s with the line through them and one 3/5. System 3 was not
+  checked note by note. This is the page
+  "Reading four- and six-line groups' marks as well" (2026-10-31) could not
+  read.
+- *Blackberry Blossom, Old Joe Clark, Moon over Shanghai* (Guitar Pro, 19
+  notes): false 5/1 and 6/1, the piece of a stem the band's edge cut under
+  the bottom line, joined to real columns as a chord (the classifier called
+  them not a digit at 0.95). They are gone; `tools/tab-rhythm-accuracy.ts`
+  matches more events to the MusicXML: Blackberry Blossom 78 to 86, Old Joe
+  Clark 142 to 148, Moon over Shanghai 150 to 155.
+- *Shortnin' Bread* (the owner's other hand page) gains its first note, a
+  3/0 drawn 1.35 spacings tall (step 2).
+
+Rechecked: `tools/tab-rhythm-accuracy.ts` 222 to 223 of 242 bars summing to
+the meter, durations agreeing on 734 of 743 matched events (715 of 724
+before: 19 more events matched, the same 9 disagreeing); Reel de Mattawa at
+200, 300 and 400 dpi and Marche des élèves: no tab, as before; Sourwood
+Mountain unchanged; `npm test` passes (68 files, 1191 tests, the local
+suites included: `tab-local.test.ts`'s 21 pages, the button tab's fixtures
+38/38 straight and turned, and the Loudéac photo 136/136 through
+`BUTTON_TAB_READ_PAGES`).
+
 ## What remains
 
 - Rests, tuplets, two voices in one tab, stems above the tab (all reported
@@ -719,9 +814,9 @@ makes that bar sum (`tools/tab-rhythm-accuracy.ts` 221 to 222 of 242 bars,
 - Scans and photos: unchanged from tab-2 and tab-3, but for a turned scan's
   lines, a hand's large digits and slanting stems, and a hand's digits read
   by the classifier (Weeping Willow, above).
-- Weeping Willow still loses 10 of 129 notes, eight of them now reported as
-  unread frets with their time; 15 of its 18 bars sum to 4/4, the other
-  three holding notes drawn with no stem.
+- Weeping Willow loses 1 of 129 notes, a 5 whose flag a thin pen stroke
+  left a pixel off its body, reported as an unread fret with its time; 15 of
+  its 18 bars sum to 4/4, the other three holding notes drawn with no stem.
 - Dead notes ("x") are annotations, not events, so their time is not
   counted; and a tied note's fret Guitar Pro leaves out comes back as an
   unread fret, not as the fret its tie gives.

@@ -18,17 +18,24 @@ import {
   type Box,
   cropOf,
   type DetectedTab,
+  grayOf,
   HAND_MARK,
   inkOf,
   inkWithoutLines,
   type Mark,
   marksOf,
+  penLevelOf,
   READ_MARK,
   type ReadCrops,
   readFret,
   type TabSystem,
 } from "./detect.js";
-import { type ClassifyDigits, fuseDigit } from "./digits.js";
+import {
+  type ClassifyDigits,
+  type DigitGuess,
+  fuseDigit,
+  NOT_A_DIGIT,
+} from "./digits.js";
 import { glyphsOf, onLines, type PageTextItem, textIn } from "./layer.js";
 import {
   type FretColumn,
@@ -251,7 +258,11 @@ export function eventsOf(
 }
 
 interface ReadMark {
+  /** The tab digit classifier's reading of a digit-height mark, when it ran. */
+  readonly guess?: DigitGuess;
   readonly mark: Mark;
+  /** One stroke: each row of its ink a single run, a stroke's width (isStroke). */
+  readonly stroke?: boolean;
   readonly text: string;
 }
 
@@ -294,7 +305,7 @@ function joinWords(
         k += 1;
       }
     }
-    return { mark, text };
+    return text === word.text ? word : { mark, text };
   });
   return { short: rest, tall: joined };
 }
@@ -330,18 +341,19 @@ function placementOf(
       technique,
       x: (mark.x + mark.w / 2) / pageWidth,
     });
-  for (const { mark, text } of tall) {
+  for (const word of tall) {
+    const { mark, text } = word;
     const reading = readMark(text);
     if (reading.kind === "unread") {
       unread += 1;
-      loose.push({ mark, text });
+      loose.push(word);
       continue;
     }
     if (reading.technique !== undefined) {
       annotate(mark, reading.technique);
     }
     if (reading.kind === "technique") {
-      loose.push({ mark, text });
+      loose.push(word);
     }
     if (reading.kind === "fret") {
       frets.push({
@@ -351,12 +363,12 @@ function placementOf(
       });
     }
   }
-  for (const { mark, text } of short) {
-    const reading = readMark(text);
+  for (const word of short) {
+    const reading = readMark(word.text);
     if (reading.kind === "technique") {
-      annotate(mark, reading.technique);
+      annotate(word.mark, reading.technique);
     } else {
-      loose.push({ mark, text });
+      loose.push(word);
     }
   }
   annotations.sort((a, b) => a.x - b.x || a.string - b.string);
@@ -459,6 +471,7 @@ export async function readTablature(
   const ink = withMatScope(
     (scope) => new Uint8Array(inkOf(cv, scope, page).data)
   );
+  const gray = grayOf(cv, page);
   const glyphs = glyphsOf(layer, page.width, page.height);
   const readings: TabReading[] = [];
   for (const tab of tabs) {
@@ -477,7 +490,7 @@ export async function readTablature(
           page.width
         )
       : // biome-ignore lint/performance/noAwaitInLoops: one recogniser session, one system at a time
-        await placementByRecogniser(cv, page, ink, tab, read, classify);
+        await placementByRecogniser(cv, page, ink, gray, tab, read, classify);
     const readBoxes = async (wanted: readonly Box[]): Promise<string[]> => {
       const inLayer = wanted.map((box) =>
         fromLayer ? textIn(glyphs, box, LAYER_PAD * tab.group.spacing) : ""
@@ -498,15 +511,48 @@ export async function readTablature(
           : text
       );
     };
-    const columns = columnsOf(placement.frets, tab.group.spacing);
-    const geometry = rhythmGeometry(
-      cv,
-      ink,
-      page.width,
-      page.height,
-      tab.group,
-      columns.map(fretColumnOf)
+    const geometryOf = (frets: readonly PlacedFret[]) => {
+      const cols = columnsOf(frets, tab.group.spacing);
+      return {
+        columns: cols,
+        geometry: rhythmGeometry(
+          cv,
+          ink,
+          page.width,
+          page.height,
+          tab.group,
+          cols.map(fretColumnOf)
+        ),
+      };
+    };
+    const first = geometryOf(placement.frets);
+    // A stem with its beam under no fret proves a note: the mark over it
+    // that read as no fret is that note's fret when it reads as a digit at
+    // all (stemFretOf). Read again with those frets in.
+    const proven = first.geometry.strays.flatMap((stray) => {
+      const over = markOver(stray, placement.loose, tab.group.spacing);
+      const fret =
+        over === undefined ? undefined : stemFretOf(over, tab.group.spacing);
+      return over === undefined || fret === undefined
+        ? []
+        : [
+            {
+              over,
+              placed: {
+                box: over.mark,
+                centre: over.mark.x + over.mark.w / 2,
+                note: { fret, string: over.mark.line + 1 },
+              },
+            },
+          ];
+    });
+    const loose = placement.loose.filter(
+      (mark) => !proven.some((p) => p.over === mark)
     );
+    const { columns, geometry } =
+      proven.length === 0
+        ? first
+        : geometryOf([...placement.frets, ...proven.map((p) => p.placed)]);
     const boxes: Box[] = [
       ...geometry.timeDigits.flat(),
       ...geometry.slurs.flatMap((slur) => slur.letters),
@@ -564,7 +610,7 @@ export async function readTablature(
     const unreadFrets = geometry.strays
       .filter((stray) => !lettered(stray))
       .map((stray) =>
-        unreadFretOf(stray, placement.loose, tab.group.spacing, page.width)
+        unreadFretOf(stray, loose, tab.group.spacing, page.width)
       );
     readings.push({
       ...tab.system,
@@ -599,13 +645,7 @@ function unreadFretOf(
   spacing: number,
   pageWidth: number
 ): TabUnreadFret {
-  const [over] = loose
-    .filter(
-      ({ mark }) =>
-        Math.abs(mark.x + mark.w / 2 - stray.x) <= UNREAD_REACH * spacing &&
-        mark.y + mark.h / 2 < stray.top
-    )
-    .sort((a, b) => b.mark.y - a.mark.y);
+  const over = markOver(stray, loose, spacing);
   const text = over?.text.trim() ?? "";
   return {
     reason: "stem_without_fret",
@@ -614,6 +654,94 @@ function unreadFretOf(
     ...(text === "" ? {} : { text }),
     x: stray.x / pageWidth,
   };
+}
+
+/** The lowest mark read as no fret standing over a stray stem's top, if any. */
+function markOver(
+  stray: StrayStem,
+  loose: readonly ReadMark[],
+  spacing: number
+): ReadMark | undefined {
+  return loose
+    .filter(
+      ({ mark }) =>
+        Math.abs(mark.x + mark.w / 2 - stray.x) <= UNREAD_REACH * spacing &&
+        mark.y + mark.h / 2 < stray.top
+    )
+    .sort((a, b) => b.mark.y - a.mark.y)[0];
+}
+
+/**
+ * Over a stem that proves a note, the classifier is believed down to this
+ * probability: a hand's 2 RapidOCR reads "Z" (0.91), a tick it reads "f"
+ * (0.81). Without a stem under it a mark needs DIGIT_SURE.
+ */
+const STEM_DIGIT_SURE = 0.8;
+
+/** A tick read as a 1 is at least this tall, in line spacings; a stroke's stub is shorter. */
+const TICK_HEIGHT = 0.6;
+/** A stroke's median row, in line spacings (the guard's strokeWidth). */
+const TICK_WIDTH = 0.4;
+/**
+ * A tick is at most this wide for its height: Weeping Willow's lean 0.36 and
+ * 0.47, a hand's 5, whose rows are single strokes too, 0.72.
+ */
+const TICK_LEAN = 0.6;
+
+/**
+ * The fret a mark that read as no fret names when a stray stem under it
+ * proves a note: the classifier's digit when it is STEM_DIGIT_SURE, or 1 for
+ * a single stroke at least TICK_HEIGHT tall and no wider than TICK_LEAN of
+ * its height, a 1 drawn as a tick (the
+ * recogniser reads it "1" on a mark too short for a fret, or "f"). A
+ * technique letter stays a letter. Undefined when it names none.
+ */
+function stemFretOf(over: ReadMark, spacing: number): number | undefined {
+  if (readMark(over.text).kind === "technique") {
+    return;
+  }
+  const { guess } = over;
+  if (
+    guess !== undefined &&
+    guess.digit !== NOT_A_DIGIT &&
+    guess.probability >= STEM_DIGIT_SURE
+  ) {
+    return guess.digit;
+  }
+  const { h, w } = over.mark;
+  return over.stroke === true &&
+    h >= TICK_HEIGHT * spacing &&
+    w <= TICK_LEAN * h
+    ? 1
+    : undefined;
+}
+
+/**
+ * Whether a crop's ink is one stroke: every inked row a single run, the
+ * median run no wider than TICK_WIDTH line spacings (a row along a line
+ * comes out wider, where the pen and the line's blur meet).
+ */
+function isStroke(crop: ColorImage, spacing: number): boolean {
+  const widths: number[] = [];
+  for (let y = 0; y < crop.height; y += 1) {
+    let runs = 0;
+    let width = 0;
+    for (let x = 0; x < crop.width; x += 1) {
+      const inked = (crop.data[(y * crop.width + x) * 3] ?? 255) < 128;
+      const before =
+        x > 0 && (crop.data[(y * crop.width + x - 1) * 3] ?? 255) < 128;
+      runs += inked && !before ? 1 : 0;
+      width += inked ? 1 : 0;
+    }
+    if (runs > 1) {
+      return false;
+    }
+    if (runs === 1) {
+      widths.push(width);
+    }
+  }
+  widths.sort((a, b) => a - b);
+  return (widths[Math.floor(widths.length / 2)] ?? 0) <= TICK_WIDTH * spacing;
 }
 
 /** Grace frets stand under this share of the system's median fret height. */
@@ -647,12 +775,15 @@ async function placementByRecogniser(
   cv: OpenCv,
   page: ColorImage,
   ink: Uint8Array,
+  gray: Uint8Array,
   tab: DetectedTab,
   read: ReadCrops,
   classify: ClassifyDigits | undefined
 ): Promise<Placement> {
   // A fret over its lines may have a stroke turning along one; a knocked-out fret never does.
   const jogs = tab.knocksOut !== true;
+  const below = penLevelOf(gray, page.width, tab.group);
+  const pen = below === undefined ? undefined : { below, gray };
   const { marks, short } = marksOf(
     cv,
     ink,
@@ -660,14 +791,16 @@ async function placementByRecogniser(
     page.height,
     tab.group,
     tab.hand === true ? HAND_MARK : READ_MARK,
-    jogs
+    jogs,
+    pen
   );
   const lineless = inkWithoutLines(
     ink,
     page.width,
     page.height,
     tab.group,
-    jogs
+    jogs,
+    pen
   );
   const readAll = async (
     list: readonly Mark[],
@@ -687,8 +820,13 @@ async function placementByRecogniser(
     return list.map((mark, k) => {
       const text = texts[k] ?? "";
       const guess = guesses[k];
+      const crop = crops[k];
       return {
         mark,
+        ...(guess === undefined ? {} : { guess }),
+        ...(crop !== undefined && isStroke(crop, tab.group.spacing)
+          ? { stroke: true }
+          : {}),
         text:
           guess === undefined
             ? text

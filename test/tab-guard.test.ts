@@ -14,13 +14,16 @@ import {
   bandWithoutLines,
   componentBoxes,
   detectTablature,
+  grayOf,
   inkOf,
   isFretText,
   marksOf,
+  penLevelOf,
   READ_MARK,
   type ReadCrops,
   whitenTablature,
 } from "../src/tab/detect.js";
+import { type ClassifyDigits, NOT_A_DIGIT } from "../src/tab/digits.js";
 import { readTablature } from "../src/tab/read.js";
 import { CPU, describeWithModels, storeOn } from "./support/models.js";
 import { testOpenCv } from "./support/opencv.js";
@@ -402,6 +405,165 @@ describe("reading the marks of a hand", () => {
   });
 });
 
+describe("a pen over printed rules", () => {
+  const top = 400;
+  const line = (k: number) => top + k * TAB;
+  // A 4 whose crossbar lies along the third line: its diagonal comes down to
+  // the line from above, its upright crosses it.
+  const four = (x: number): Drawn => ({
+    kind: "strokes",
+    strokes: [
+      {
+        points: [
+          [x + 2, line(2) - 12],
+          [x, line(2) - 2],
+        ],
+        thickness: 2,
+      },
+      {
+        points: [
+          [x, line(2)],
+          [x + 13, line(2)],
+        ],
+        thickness: 2,
+      },
+      {
+        points: [
+          [x + 10, line(2) - 12],
+          [x + 10, line(2) + 9],
+        ],
+        thickness: 2,
+      },
+    ],
+  });
+
+  const marksNear = async (lineGray: number, x: number) => {
+    const cv = await testOpenCv();
+    const page = drawPage(cv, [
+      { empty: true, kind: "tab", lineGray, lines: 4, spacing: TAB, top },
+      four(x),
+    ]);
+    const [tab] = await detectTablature(cv, page, unreachable);
+    if (tab === undefined) {
+      throw new Error("the four-line tab was not found");
+    }
+    const ink = withMatScope(
+      (scope) => new Uint8Array(inkOf(cv, scope, page).data)
+    );
+    const gray = grayOf(cv, page);
+    const below = penLevelOf(gray, page.width, tab.group);
+    const near = (pen: boolean) => {
+      const { marks, short } = marksOf(
+        cv,
+        ink,
+        page.width,
+        page.height,
+        tab.group,
+        READ_MARK,
+        true,
+        pen && below !== undefined ? { below, gray } : undefined
+      );
+      return [...marks, ...short].filter((m) => Math.abs(m.x - x) < TAB);
+    };
+    return { below, withoutPen: near(false), withPen: near(true) };
+  };
+
+  it("keeps a 4 whole whose crossbar lies along a line lighter than the pen", async () => {
+    const { below, withPen, withoutPen } = await marksNear(140, 600);
+    expect(below).toBeDefined();
+    expect(withPen).toHaveLength(1);
+    expect(withPen[0]?.w).toBeGreaterThanOrEqual(13);
+    expect(withoutPen.length).toBeGreaterThan(1);
+  });
+
+  it("finds no pen on black rules: a printed page erases its lines as before", async () => {
+    const { below } = await marksNear(0, 600);
+    expect(below).toBeUndefined();
+  });
+
+  it("takes no stem the band's edge cuts for a 1 on the bottom line", async () => {
+    const cv = await testOpenCv();
+    const x = 700;
+    const page = drawPage(cv, [
+      { empty: true, kind: "tab", lines: 4, spacing: TAB, top },
+      {
+        kind: "strokes",
+        strokes: [
+          {
+            points: [
+              [x, line(3) - Math.round(0.3 * TAB)],
+              [x, line(3) + 3 * TAB],
+            ],
+            thickness: 3,
+          },
+        ],
+      },
+    ]);
+    const [tab] = await detectTablature(cv, page, unreachable);
+    if (tab === undefined) {
+      throw new Error("the four-line tab was not found");
+    }
+    const ink = withMatScope(
+      (scope) => new Uint8Array(inkOf(cv, scope, page).data)
+    );
+    const { marks, short } = marksOf(
+      cv,
+      ink,
+      page.width,
+      page.height,
+      tab.group,
+      READ_MARK,
+      true
+    );
+    expect([...marks, ...short].filter((m) => Math.abs(m.x - x) < TAB)).toEqual(
+      []
+    );
+  });
+
+  it("takes a hand's digit up to 1.45 spacings tall and 1.55 wide", async () => {
+    const cv = await testOpenCv();
+    const x = 800;
+    // 1.43 tall by 1.48 wide with the stroke: over the 1.3 by 1.35 bound.
+    const h = Math.round(1.3 * TAB);
+    const w = Math.round(1.35 * TAB);
+    const page = drawPage(cv, [
+      { empty: true, kind: "tab", lines: 4, spacing: TAB, top },
+      {
+        kind: "strokes",
+        strokes: [
+          {
+            points: [
+              [x, line(1) - h / 2],
+              [x + w, line(1) - h / 2],
+              [x + w, line(1) + h / 2],
+              [x, line(1) + h / 2],
+              [x, line(1) - h / 2],
+            ],
+            thickness: 2,
+          },
+        ],
+      },
+    ]);
+    const [tab] = await detectTablature(cv, page, unreachable);
+    if (tab === undefined) {
+      throw new Error("the four-line tab was not found");
+    }
+    const ink = withMatScope(
+      (scope) => new Uint8Array(inkOf(cv, scope, page).data)
+    );
+    const { marks } = marksOf(
+      cv,
+      ink,
+      page.width,
+      page.height,
+      tab.group,
+      READ_MARK,
+      true
+    );
+    expect(marks.filter((m) => Math.abs(m.x - x) < TAB)).toHaveLength(1);
+  });
+});
+
 describe("notes whose fret was not read", () => {
   const top = 400;
   const line = (k: number) => top + k * TAB;
@@ -482,6 +644,79 @@ describe("notes whose fret was not read", () => {
     expect(
       reading?.unreadFrets?.map((u) => Math.round(u.x * PAGE_WIDTH))
     ).toEqual([661]);
+  });
+
+  const classifying =
+    (digit: number, probability: number): ClassifyDigits =>
+    (crops) =>
+      Promise.resolve(crops.map(() => ({ digit, probability })));
+
+  const readWith = async (
+    systems: readonly Drawn[],
+    text: string,
+    classify: ClassifyDigits
+  ) => {
+    const cv = await testOpenCv();
+    const page = drawPage(cv, systems);
+    const tabs = await detectTablature(cv, page, unreachable);
+    const [reading] = await readTablature(
+      cv,
+      page,
+      tabs,
+      answering(text).read,
+      undefined,
+      [],
+      classify
+    );
+    return {
+      events: reading?.events.map((e) => ({
+        notes: e.notes,
+        stem: e.stem.kind,
+        x: Math.round(e.x * PAGE_WIDTH),
+      })),
+      unread: reading?.unreadFrets?.map((u) => Math.round(u.x * PAGE_WIDTH)),
+    };
+  };
+
+  it("reads the mark over a stem as the classifier's digit when it is fairly sure, the stem proving a note", async () => {
+    // RapidOCR reads a hand's 2 as "Z"; the classifier says 2, under
+    // DIGIT_SURE but over STEM_DIGIT_SURE.
+    expect(await readWith(drawn, "Z", classifying(2, 0.9))).toEqual({
+      events: [{ notes: [{ fret: 2, string: 1 }], stem: "stem", x: 601 }],
+      unread: [661],
+    });
+    expect(await readWith(drawn, "Z", classifying(2, 0.7))).toMatchObject({
+      events: [],
+      unread: [601, 661],
+    });
+  });
+
+  it("reads a tick over a stem as a 1", async () => {
+    // The mark over the first stem is a short slanted stroke.
+    const ticked = drawn.map(
+      (d): Drawn =>
+        d.kind === "strokes"
+          ? {
+              ...d,
+              strokes: [
+                {
+                  points: [
+                    [603, line(0) - 8],
+                    [599, line(0) + 8],
+                  ],
+                  thickness: 3,
+                },
+                ...d.strokes.slice(1),
+              ],
+            }
+          : d
+    );
+    const { events } = await readWith(
+      ticked,
+      "f",
+      classifying(NOT_A_DIGIT, 0.9)
+    );
+    expect(events?.map((e) => e.notes)).toEqual([[{ fret: 1, string: 1 }]]);
   });
 });
 
