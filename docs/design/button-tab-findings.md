@@ -428,6 +428,13 @@ read as 16 chord texts above system 4. Through `recognizePage` now, no text
 stands above system 4 (texts per staff 2, 0, 2, 0), and the letters are
 `leftHand` of the third tab. Neither run puts a `<harmony>` in the MusicXML.
 
+**Case (2026-11-07).** On a melodeon's letter line a capital is a bass and
+lower case a chord (owner), so the case is the whole meaning. The typeset
+page now prints both on one baseline, 14 capitals and 16 lower-case chords,
+`c` 5 times beside `C` 5 times: read 30/30 with every case right, straight and
+turned, by the packed line as before (no code change). `c` against `C` is
+the pair to watch on other fonts and on photos: they differ only in size.
+
 Other samples, through `recognizePage` against the H2 results: Mattawa,
 Gavotte Koun, Flatworld and Weeping Willow are identical in every field; on
 the photo and the fixtures every field but `buttonTabs[].leftHand` is

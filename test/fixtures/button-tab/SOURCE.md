@@ -12,7 +12,7 @@ is edited by hand: change the spec and rerun.
 
 | File | Content |
 |---|---|
-| `gc-cadb-straight.png` | Three systems of a treble staff in 3/4, four bars each, with two bands under each staff: P (push) above T (pull), split by one rule, the letters P and T bold in the left margin, a bar segment through both bands under each staff bar. One button number per note in its bellows' band, under the note head: 38 marks, 18 pushed and 20 pulled, rows unmarked (8), `'` (28) and `''` (2), four two-digit numbers (10, 11, 10', 10), three held (`8'-`, `7'-`, `6'-`), and one note with no number (system 3, bar 3, the G). Under the T band, 30 left-hand capital letters on note columns. |
+| `gc-cadb-straight.png` | Three systems of a treble staff in 3/4, four bars each, with two bands under each staff: P (push) above T (pull), split by one rule, the letters P and T bold in the left margin, a bar segment through both bands under each staff bar. One button number per note in its bellows' band, under the note head: 38 marks, 18 pushed and 20 pulled, rows unmarked (8), `'` (28) and `''` (2), four two-digit numbers (10, 11, 10', 10), three held (`8'-`, `7'-`, `6'-`), and one note with no number (system 3, bar 3, the G). Under the T band, 30 left-hand letters on note columns, set on one baseline as print sets them: 14 capitals for the basses and 16 lower case for the chords (chords `a`, `b`, `c`, `d`, `e`, `f`, `g`; `c` 5 times beside `C` 5 times), the melodeon convention (owner, 2026-11-07). |
 | `gc-cadb-rotated.png` | The same page turned 0.3 degrees clockwise about its centre. |
 
 Every page is 2480×3508 (A4 at 300 dpi), 8-bit grayscale. The staff, clef,

@@ -546,6 +546,23 @@ function placed(glyph, cx, cy) {
   };
 }
 
+/** `glyph` with its ink centred on cx, its text set on the baseline y. */
+function onBaseline(glyph, cx, y) {
+  const ax = Math.round(cx - (glyph.box.l + glyph.box.r) / 2);
+  return {
+    box: {
+      b: y + glyph.box.b,
+      l: ax + glyph.box.l,
+      r: ax + glyph.box.r,
+      t: y + glyph.box.t,
+    },
+    svg: glyph.runs
+      .map((run) => textElement(run.label, ax + run.dx, y))
+      .join(""),
+    x: ax + (glyph.box.l + glyph.box.r) / 2,
+  };
+}
+
 function glyphsFor(page, work, env) {
   const s = page.spacing;
   const [probe] = measure(
@@ -841,7 +858,7 @@ const BAND_RULE = 2;
 const BAND_BAR = 2;
 const BUTTON_FIRST_TOP = 560;
 const MARK_TOKEN = /^([PT])(\d{1,2})('{0,2})(-?)$/;
-const LETTER_TOKEN = /^[A-G]$/;
+const LETTER_TOKEN = /^[A-Ga-g]$/;
 const DUMP_OUT = /<pre id="out">([^<]+)<\/pre>/;
 const BUTTON_PAGES = [
   { file: "gc-cadb-straight.png", rotation: 0 },
@@ -853,7 +870,8 @@ const BUTTON_PAGES = [
  * G row outer, C row ', accidentals row ''), every button sounding the staff
  * note on its bellows. One ABC line per system. `tab` holds one token per note
  * head, bar by bar: P or T, the button as printed and its suffix, or "." for a
- * note with no number. `bass` holds the left hand's letter or "." per note.
+ * note with no number. `bass` holds the left hand's letter or "." per note:
+ * a capital for a bass, lower case for a chord (owner, 2026-11-07).
  */
 const BUTTON_TUNE = {
   abc: "X:1\nM:3/4\nL:1/8\n%%stretchlast true\nK:C\n",
@@ -861,17 +879,17 @@ const BUTTON_TUNE = {
   systems: [
     {
       abc: "c2 e2 g2 | d2 B2 G2 | Acf a3 | g6 |",
-      bass: "C C C | G G G | F . F . | C",
+      bass: "C c c | G g g | F . f . | C",
       tab: "P6' P7' P8' | T7' T6' T3'' | T5' T8 T8' T9' | P8'-",
     },
     {
       abc: "edc def | g2 b2 d'2 | c'2 ba g2 | ^f2 d4 |",
-      bass: "C . C . G . | G G G | C G . C | D G",
+      bass: "C . c . G . | G g g | C g . c | D d",
       tab: "P7' T7' P6' T7' P7' T8' | P9 P10 P11 | P9' T10' T9' P8' | T10 T7'-",
     },
     {
       abc: "a2 ^g2 a2 | fed cBA | G2 B2 d2 | c6 |]",
-      bass: "A E A | F . C . G . | G G G | C",
+      bass: "A e a | F . c . G . | G b g | C",
       tab: "T9' P7'' T9' | T8' P7' T7' P6' T6' T7 | . P7 P8 | P6'-",
     },
   ],
@@ -1084,6 +1102,10 @@ function layoutButtonSystem(system, index, scale, top, glyph) {
   const rule = Math.round(bandTop + BAND.height * spacing);
   const bandBottom = Math.round(rule + BAND.height * spacing);
   const lettersY = bandBottom + BAND.letters * spacing;
+  // The left hand's letters share one baseline, as print sets them: a capital
+  // (a bass) has its ink centred on lettersY, a lower-case chord sits lower.
+  const capital = glyph("C").box;
+  const lettersBaseline = Math.round(lettersY - (capital.t + capital.b) / 2);
   const svg = [
     `<g transform="translate(${tx} ${ty}) scale(${scale})">${line.svg}</g>`,
     `<rect x="${SYSTEM_X0}" y="${rule - BAND_RULE / 2}" width="${SYSTEM_X1 - SYSTEM_X0}" height="${BAND_RULE}" fill="#000"/>`,
@@ -1135,7 +1157,7 @@ function layoutButtonSystem(system, index, scale, top, glyph) {
       });
     }
     if (note.letter !== null) {
-      const drawn = placed(glyph(note.letter), cx, lettersY);
+      const drawn = onBaseline(glyph(note.letter), cx, lettersBaseline);
       svg.push(drawn.svg);
       leftHand.push({ text: note.letter, x: drawn.x, y: lettersY });
     }
