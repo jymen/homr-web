@@ -1671,6 +1671,12 @@ function sampleOf<T>(marks: readonly T[]): T[] {
  * at a time, stopping as soon as the share read so far decides. A tab's
  * first batch decides alone (the prototype measured shares of 0.87 to 1.00
  * on tabs, 0.00 on staves).
+ *
+ * Numbers that are all ones never decide: a staff's stems, cut between its
+ * lines, read "1" and "11". The Sailor's Bonnet, a scan at 300 dpi, lost its
+ * third staff to a first batch of four "1" (2026-11-19). A single repeated
+ * value is not the tell: 18 of the 110 tab groups on the local pages read
+ * one value only, "0" or "7", and none of them read only ones.
  */
 async function marksAreNumbers(
   crops: readonly ColorImage[],
@@ -1678,21 +1684,27 @@ async function marksAreNumbers(
 ): Promise<boolean> {
   const sample = sampleOf(crops);
   let digits = 0;
+  let notOnes = false;
   let seen = 0;
   for (let start = 0; start < sample.length; start += TAB.readBatch) {
     const batch = sample.slice(start, start + TAB.readBatch);
     // biome-ignore lint/performance/noAwaitInLoops: each batch may decide, and the next is then never read
-    digits += (await read(batch)).filter(isFretText).length;
+    const frets = (await read(batch)).flatMap((text) => readFret(text) ?? []);
+    digits += frets.length;
+    notOnes ||= frets.some(({ fret }) => !STEM_FRETS.has(fret));
     seen += batch.length;
     if (digits < TAB.minDigitShare * seen) {
       return false;
     }
-    if (digits >= TAB.minDigits) {
+    if (digits >= TAB.minDigits && notOnes) {
       return true;
     }
   }
   return false;
 }
+
+/** What a stem cut between two lines reads as: one stroke, or two side by side. */
+const STEM_FRETS: ReadonlySet<number> = new Set([1, 11]);
 
 /** The share of the marks whose line is blank just left and just right of them; undefined under `minDigits` marks. */
 function knockedOutShare(
