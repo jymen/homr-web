@@ -7,7 +7,7 @@ import { pySliceBounds, toFloat32 } from "../image/numeric.js";
 import { type ColorImage, slicePlane } from "../image/plane.js";
 import type { Staff } from "../model/staff.js";
 import type { PageText, StaffBox } from "../result.js";
-import type { RapidOcr } from "./rapid-ocr.js";
+import type { OcrLine, RapidOcr } from "./rapid-ocr.js";
 import { chordStrip, cropStrip, pageText, sortPageTexts } from "./strips.js";
 
 /** A crop RapidOCR cannot read: an empty slice, on which the Python divides by zero. */
@@ -85,13 +85,22 @@ export function isTempoMarking(text: string): boolean {
 export const cleanupText = (text: string): string =>
   text.normalize("NFC").replace(NOT_TITLE_TEXT, " ").trim();
 
-/** The crop _detect_title_task reads: 15 unit sizes above the first staff, 50 px wider each side. */
-export function titleCrop(original: ColorImage, top: Staff): ColorImage {
+/**
+ * The crop _detect_title_task reads: 15 unit sizes above the first staff, 50 px
+ * wider each side. `toPageEdge` runs it on to the page's left edge, keeping
+ * its right edge, for a title that starts further left than that.
+ */
+export function titleCrop(
+  original: ColorImage,
+  top: Staff,
+  toPageEdge = false
+): ColorImage {
   let height = Math.trunc(15 * top.averageUnitSize);
   const y = Math.max(Math.trunc(top.minY) - height, 0);
-  const x = Math.max(Math.trunc(top.minX) - 50, 0);
+  const homrX = titleLeft(top);
+  const x = toPageEdge ? 0 : homrX;
   const width = Math.min(
-    Math.trunc(top.maxX - top.minX) + 100,
+    Math.trunc(top.maxX - top.minX) + 100 + homrX - x,
     original.width - x
   );
   height = Math.min(height, Math.trunc(top.minY) - y);
@@ -106,31 +115,94 @@ export function titleCrop(original: ColorImage, top: Staff): ColorImage {
   );
 }
 
+/** Where homr's title crop starts on the page. */
+const titleLeft = (top: Staff): number =>
+  Math.max(Math.trunc(top.minX) - 50, 0);
+
+/**
+ * A line whose box starts this close to the crop's left edge was cut by it:
+ * "The Sailor's Bonnet" printed left of an indented first staff came out
+ * "he Sailor's Bonnet" (2026-11-19).
+ */
+const CUT_AT_LEFT_PX = 2;
+
+const xsOf = (line: OcrLine) => line.box.map(([x]) => x);
+const ysOf = (line: OcrLine) => line.box.map(([, y]) => y);
+
+/** The line with the tallest characters that is not a tempo marking. */
+function tallestLine(lines: readonly OcrLine[]): OcrLine | undefined {
+  let best: { readonly line: OcrLine; readonly size: number } | undefined;
+  for (const line of lines) {
+    if (isTempoMarking(line.text)) {
+      continue;
+    }
+    const ys = ysOf(line);
+    const size = toFloat32(
+      toFloat32(Math.max(...ys) - Math.min(...ys)) / [...line.text].length
+    );
+    if (best === undefined || size > best.size) {
+      best = { line, size };
+    }
+  }
+  return best?.line;
+}
+
+/**
+ * The line of `wider` (read from the crop run on to the page's left edge)
+ * that is `cut` made whole: the one sharing most of its rows, among those
+ * that reach into its columns. `shift` is how much further left the wider
+ * crop starts.
+ */
+function wholeLine(
+  cut: OcrLine,
+  wider: readonly OcrLine[],
+  shift: number
+): OcrLine | undefined {
+  const right = Math.max(...xsOf(cut)) + shift;
+  const top = Math.min(...ysOf(cut));
+  const bottom = Math.max(...ysOf(cut));
+  const sharedRows = (line: OcrLine): number => {
+    const ys = ysOf(line);
+    const reaches = Math.min(...xsOf(line)) < right;
+    return reaches
+      ? Math.min(bottom, Math.max(...ys)) - Math.max(top, Math.min(...ys))
+      : 0;
+  };
+  let whole: OcrLine | undefined;
+  for (const line of wider) {
+    if (sharedRows(line) > (whole === undefined ? 0 : sharedRows(whole))) {
+      whole = line;
+    }
+  }
+  return whole;
+}
+
 /**
  * homr's _detect_title_task: the line with the tallest characters that is
  * not a tempo marking, reduced to letters, digits and single spaces.
  * `original` is the autocropped and resized page homr's Debug holds.
+ *
+ * One departure: when that line starts at the crop's left edge, it is read
+ * again from a crop run on to the page's edge. Only a cut line is re-read,
+ * because a crop that wide from the start takes a tuning or a part label at
+ * the left margin for the title (two clawhammer pages, Amazing Grace).
  */
 export async function detectTitle(
   ocr: RapidOcr,
   original: ColorImage,
   top: Staff
 ): Promise<string> {
-  const lines = await ocr.read(
-    nonEmpty(titleCrop(original, top), "the band above the first staff")
+  const what = "the band above the first staff";
+  const best = tallestLine(
+    await ocr.read(nonEmpty(titleCrop(original, top), what))
   );
-  let best: { readonly size: number; readonly text: string } | undefined;
-  for (const line of lines) {
-    if (isTempoMarking(line.text)) {
-      continue;
-    }
-    const ys = line.box.map(([, y]) => y);
-    const size = toFloat32(
-      toFloat32(Math.max(...ys) - Math.min(...ys)) / [...line.text].length
-    );
-    if (best === undefined || size > best.size) {
-      best = { size, text: line.text };
-    }
+  if (best === undefined) {
+    return "";
   }
-  return best === undefined ? "" : cleanupText(best.text);
+  const shift = titleLeft(top);
+  if (shift === 0 || Math.min(...xsOf(best)) > CUT_AT_LEFT_PX) {
+    return cleanupText(best.text);
+  }
+  const wider = await ocr.read(nonEmpty(titleCrop(original, top, true), what));
+  return cleanupText((wholeLine(best, wider, shift) ?? best).text);
 }
